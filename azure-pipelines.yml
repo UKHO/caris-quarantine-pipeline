@@ -132,11 +132,11 @@ stages:
   dependsOn: ScanContainer
   condition: failed()
   jobs:
-  - job: PullTagAndPush
-    displayName: 'Pull, Tag and Push the image to the Private ACR'
+  - job: SendTeamsMessage
+    displayName: 'Send Alert to Teams Channel'
     steps:
     - task: PowerShell@2
-      displayName: 'Pull Published Image'
+      displayName: 'Send Alert'
       inputs:
         targetType: 'inline'
         script: |
