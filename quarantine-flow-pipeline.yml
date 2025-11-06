@@ -9,7 +9,7 @@ resources:
 variables:
   # Source registry variables - these are populated from the webhook trigger
   - name: sourceRegistryServiceConnection
-    value: 'source-docker-registry-connection'
+    value: 'Public ACR live'
   - name: sourceRepository
     value: ${{ parameters.AcrWebhookTrigger.target.repository }}
   - name: sourceTag
@@ -19,15 +19,15 @@ variables:
   
   # Destination registry variables
   - name: destinationRegistryServiceConnection
-    value: 'destination-docker-registry-connection'
+    value: 'Public ACR live'
   - name: destinationRegistry
-    value: ''
+    value: 'publiccrlive.azurecr.io'
   - name: destinationImageRepository
     value: 'scanned/$(sourceRepository)'
   
   # Snyk variables
   - name: snykServiceConnection
-    value: 'Snyk Auth'
+    value: 'SnykAuth'
   - name: snykOrganization
     value: 'caris-cloud'
   
@@ -39,7 +39,7 @@ variables:
 
   # Alert Variable
   - name: teamsWebhookEndpoint
-    value: ''
+    value: 'https://default9134ca48663d4a05968a31a42f0aed.3e.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/de74f4997f4a422aaca33a0154313553/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=cE4gSKZm6bTSd90iEzhYPndvrXUbFcAOmXafo4UC4OU'
 
 stages:
 - stage: ScanContainer
@@ -140,12 +140,11 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          if ($(teamsWebhookEndpoint) -ne '') {
+          if ('$(teamsWebhookEndpoint)' -ne '') {
             $body = @{
-              summary = '❌Container scanning and push completed unsuccessfully! Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)'
-              text = '❌Container scanning and push completed unsuccessfully!'
-            }
-            Invoke-WebRequest -Uri $(teamsWebhookEndpoint) -Method Post -Body $body -ContentType 'application/json'
+              text = "❌ Container scanning failed!`n`nSource image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
+            } | ConvertTo-Json
+            Invoke-RestMethod -Uri '$(teamsWebhookEndpoint)' -Method Post -Body $body -ContentType 'application/json'
           }
 
     # Summary step
