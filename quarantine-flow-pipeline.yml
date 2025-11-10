@@ -9,7 +9,7 @@ resources:
 variables:
   # Source registry variables - these are populated from the webhook trigger
   - name: sourceRegistryServiceConnection
-    value: 'Public ACR live'
+    value: 'publiccrlive-docker'
   - name: sourceRepository
     value: ${{ parameters.AcrWebhookTrigger.target.repository }}
   - name: sourceTag
@@ -19,7 +19,7 @@ variables:
   
   # Destination registry variables
   - name: destinationRegistryServiceConnection
-    value: 'Public ACR live'
+    value: 'publiccrlive-docker'
   - name: destinationRegistry
     value: 'publiccrlive.azurecr.io'
   - name: destinationImageRepository
