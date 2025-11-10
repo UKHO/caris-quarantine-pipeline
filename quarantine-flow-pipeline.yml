@@ -20,9 +20,9 @@ variables:
   
   # Destination registry variables
   - name: destinationRegistryServiceConnection
-    value: 'destination-docker-registry-connection'
+    value: 'publiccrlive-docker'
   - name: destinationRegistry
-    value: ''
+    value: 'publiccrlive.azurecr.io'
   - name: destinationImageRepository
     value: 'scanned/$(sourceRepository)'
   
