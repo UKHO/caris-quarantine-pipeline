@@ -57,7 +57,7 @@ stages:
   - job: ContainerScan
     displayName: 'Scan Pushed Image'
     pool:
-      name: 'Mare Nectaris'
+      vmImage: 'ubuntu-latest'
     steps:
     # Login to source registry
     - task: Docker@2
@@ -93,7 +93,7 @@ stages:
   - job: PullTagAndPush
     displayName: 'Pull, Tag and Push the image to the Private ACR'
     pool:
-      name: 'Mare Nectaris'
+      vmImage: 'ubuntu-latest'
     steps:
     # Login to source registry
     - task: Docker@2
@@ -148,7 +148,7 @@ stages:
   - job: SendTeamsMessage
     displayName: 'Send Alert to Teams Channel'
     pool:
-      name: 'Mare Nectaris'
+      vmImage: 'ubuntu-latest'
     steps:
     - task: PowerShell@2
       displayName: 'Send Alert'
