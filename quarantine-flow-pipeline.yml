@@ -5,6 +5,9 @@ resources:
   webhooks:
     - webhook: AcrWebhookTrigger
       connection: AcrWebhookConnection
+      filters:
+        - path: target.mediaType
+          value: "application/vnd.oci.image.index.v1+json"
 
 variables:
   # Source registry variables - these are populated from the webhook trigger
