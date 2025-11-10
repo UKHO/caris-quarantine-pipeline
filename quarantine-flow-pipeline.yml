@@ -9,7 +9,7 @@ parameters:
   - name: sourceTag
     type: string
     default: ''
-    displayName: 'Source Tag (e.g., latest)'
+    displayName: 'Source Tag (e.g., alpine)'
   - name: sourceHost
     type: string
     default: 'publiccrlive.azurecr.io'
