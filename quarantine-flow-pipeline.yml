@@ -11,11 +11,11 @@ variables:
   - name: sourceRegistryServiceConnection
     value: 'publiccrlive-docker'
   - name: sourceRepository
-    value: ${{ parameters.AcrWebhookTrigger.target.repository }}
+    value: $(resources.webhook.AcrWebhookTrigger.target.repository)
   - name: sourceTag
-    value: ${{ parameters.AcrWebhookTrigger.target.tag }}
+    value: $(resources.webhook.AcrWebhookTrigger.target.tag)
   - name: sourceHost
-    value: ${{ parameters.AcrWebhookTrigger.request.host }}
+    value: $(resources.webhook.AcrWebhookTrigger.request.host)
   
   # Destination registry variables
   - name: destinationRegistryServiceConnection
