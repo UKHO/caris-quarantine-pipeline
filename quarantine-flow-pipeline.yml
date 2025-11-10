@@ -2,10 +2,10 @@ trigger: none
 pr: none
 
 parameters:
-  - name: sourceRepository
-    type: string
-    default: ''
-    displayName: 'Source Repository (e.g., test/nginx)'
+#  - name: sourceRepository
+#    type: string
+#    default: ''
+#    displayName: 'Source Repository (e.g., test/nginx)'
   - name: sourceTag
     type: string
     default: 'latest' #ukho
@@ -19,8 +19,8 @@ variables:
   # Source registry variables
   - name: sourceRegistryServiceConnection
     value: 'publiccrlive-docker'
-  - name: sourceRepository
-    value: ${{ parameters.sourceRepository }}
+  #- name: sourceRepository
+  #  value: ${{ parameters.sourceRepository }}
   - name: sourceTag
     value: ${{ parameters.sourceTag }}
   - name: sourceHost
