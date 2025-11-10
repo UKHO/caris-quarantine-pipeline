@@ -8,7 +8,7 @@ parameters:
     displayName: 'Source Repository (e.g., test/nginx)'
   - name: sourceTag
     type: string
-    default: ''
+    default: 'latest' #ukho
     displayName: 'Source Tag (e.g., alpine)'
   - name: sourceHost
     type: string
