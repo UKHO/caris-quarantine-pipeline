@@ -147,12 +147,13 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          if ($(teamsWebhookEndpoint) -ne '') {
+          $webhookUrl = '$(teamsWebhookEndpoint)'
+          if ($webhookUrl -ne '') {
             $body = @{
-              summary = '❌Container scanning and push completed unsuccessfully! Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)'
-              text = '❌Container scanning and push completed unsuccessfully!'
-            }
-            Invoke-WebRequest -Uri $(teamsWebhookEndpoint) -Method Post -Body $body -ContentType 'application/json'
+              summary = 'Container scanning failed! Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)'
+              text = 'Container scanning failed!'
+            } | ConvertTo-Json
+            Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
           }
 
     # Summary step
