@@ -43,7 +43,7 @@ variables:
 
   # Alert Variable
   - name: teamsWebhookEndpoint
-    value: ''
+    value: 'https://default9134ca48663d4a05968a31a42f0aed.3e.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/de74f4997f4a422aaca33a0154313553/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=cE4gSKZm6bTSd90iEzhYPndvrXUbFcAOmXafo4UC4OU'
 
 stages:
 - stage: ScanContainer
@@ -75,7 +75,7 @@ stages:
         serviceConnectionEndpoint: '$(snykServiceConnection)'
         testType: container
         monitorWhen: never
-        severityThreshold: high
+        severityThreshold: high # change to low to test teams alert
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
 - stage: PushToPrivateRepo
