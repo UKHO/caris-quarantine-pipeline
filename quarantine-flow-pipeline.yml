@@ -150,8 +150,8 @@ stages:
           $webhookUrl = '$(teamsWebhookEndpoint)'
           Write-Host "Webhook URL: $webhookUrl"
           
-          if ($webhookUrl -ne '' -and $webhookUrl -ne 'https://default9134ca48663d4a05968a31a42f0aed.3e.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/de74f4997f4a422aaca33a0154313553/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=cE4gSKZm6bTSd90iEzhYPndvrXUbFcAOmXafo4UC4OU') {
-            Write-Host "Webhook URL is empty or invalid"
+          if ($webhookUrl -eq '') {
+            Write-Host "Webhook URL is empty - skipping alert"
             exit 0
           }
           
