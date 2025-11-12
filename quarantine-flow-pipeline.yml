@@ -43,7 +43,7 @@ variables:
 
   # Alert Variable
   - name: teamsWebhookEndpoint
-    value: 'https://default9134ca48663d4a05968a31a42f0aed.3e.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/de74f4997f4a422aaca33a0154313553/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=cE4gSKZm6bTSd90iEzhYPndvrXUbFcAOmXafo4UC4OU'
+    value: 'https://d217d034da18e574a33262c48b5477.aa.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/c67bbc4f253c448c8ec846386c3d9c2d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=1OVhyr6Nz66emPn1n4l7f0mdc2x0NITBZijEfnO4Krw'
 
 stages:
 - stage: ScanContainer
