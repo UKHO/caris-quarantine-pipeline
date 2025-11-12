@@ -41,6 +41,7 @@ This pipeline provides an automated security gate for container images by:
 - `source-docker-registry-connection`: Access to the source container registry
 - `destination-docker-registry-connection`: Access to the destination private registry
 - `Snyk Auth`: Snyk service connection for vulnerability scanning
+- `Service URL`: For webhook is quite specific - https://dev.azure.com/ukhydro/_apis/public/distributedtask/webhooks/AcrWebhookTrigger?api-version=6.0-preview
 
 ### Variables
 - **Source Registry**: Configured via webhook trigger
