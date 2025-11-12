@@ -158,14 +158,18 @@ stages:
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
           Write-Host "Source image: $sourceImage"
           
-          $body = @{
+          $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          $runLink = "[View pipeline run]($pipelineUrl)"
+
+          $body = [ordered]@{
             title = "Container Scanning Failed"
             message = "Container scanning failed for image: $sourceImage"
+            runLink = $runLink
+            pipelineUrl = $pipelineUrl
             sourceHost = "$(sourceHost)"
             sourceRepository = "$(sourceRepository)"
             sourceTag = "$(sourceTag)"
-            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-          } | ConvertTo-Json
+          } | ConvertTo-Json -Depth 5
           
           Write-Host "Sending request to Teams webhook..."
           Write-Host "Body: $body"
