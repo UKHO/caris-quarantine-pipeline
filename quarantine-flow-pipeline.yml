@@ -79,6 +79,25 @@ stages:
         severityThreshold: high # change to low to test teams alert
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
+    # Set a job output variable indicating scan result so later stages can read it reliably
+    - task: PowerShell@2
+      name: setScanStatusSucceeded
+      displayName: 'Set scanStatus succeeded output'
+      condition: succeeded()
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Succeeded"
+
+    - task: PowerShell@2
+      name: setScanStatusFailed
+      displayName: 'Set scanStatus failed output'
+      condition: failed()
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Failed"
+
 - stage: NotifyTeams
   displayName: 'Notify Teams of Scan Result'
   dependsOn: ScanContainer
@@ -99,9 +118,18 @@ stages:
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
           $destImage = "$(fullDestinationImageName)"
 
-          $depResult = '$(dependencies.ScanContainer.result)'.Trim()
-          Write-Host "dependencies.ScanContainer.result='$depResult'"
-          if ($depResult -ieq 'Succeeded') {
+          # First try the explicit job output variables set by the ScanContainer job steps
+          $depResult = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusSucceeded.scanStatus''])'.Trim()
+          if ([string]::IsNullOrWhiteSpace($depResult)) {
+            $depResult = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusFailed.scanStatus''])'.Trim()
+          }
+          # If still empty, fallback to the job/stage/build-level results
+          if ([string]::IsNullOrWhiteSpace($depResult)) { $depResult = '$(dependencies.ScanContainer.ContainerScan.result)'.Trim() }
+          if ([string]::IsNullOrWhiteSpace($depResult)) { $depResult = '$(dependencies.ScanContainer.result)'.Trim() }
+          Write-Host "Resolved dependency result='$depResult' (Agent.JobStatus='$(Agent.JobStatus)', Build.BuildResult='$(Build.BuildResult)')"
+
+          # Treat any status that starts with 'Succeeded' (e.g. 'Succeeded', 'SucceededWithIssues') as success
+          if ($depResult -imatch '^Succeeded') {
             $message = "✅ Snyk scan passed for image: $sourceImage`nDestination: $destImage`nView pipeline run: $pipelineUrl"
             $title = "Container Scan Passed"
           } else {
