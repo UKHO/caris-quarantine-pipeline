@@ -99,7 +99,8 @@ stages:
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
           $destImage = "$(fullDestinationImageName)"
 
-          if ("$(dependencies.ScanContainer.result)" -eq "Succeeded") {
+          $depResult = '$(dependencies.ScanContainer.result)'
+          if ($depResult -eq 'Succeeded') {
             $message = "✅ Snyk scan passed for image: $sourceImage`nDestination: $destImage`nView pipeline run: $pipelineUrl"
             $title = "Container Scan Passed"
           } else {
