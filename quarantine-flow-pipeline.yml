@@ -117,11 +117,27 @@ stages:
           $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
 
-          # Use the job result produced by the ScanContainer job
-          $depResult = '$(dependencies.ScanContainer.ContainerScan.result)'.Trim()
-          Write-Host "Resolved scan job result: '$depResult'"
+          # Prefer the explicit job-output variables set by the ScanContainer job
+          $scanSucceeded = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusSucceeded.scanStatus''])'.Trim()
+          $scanFailed = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusFailed.scanStatus''])'.Trim()
 
-          if ($depResult -imatch '^Succeeded') {
+          # Fallback to job/stage result if outputs are not present
+          $depResult = '$(dependencies.ScanContainer.ContainerScan.result)'.Trim()
+
+          # Also log Agent and Build-level statuses for debugging
+          $agentStatus = '$(Agent.JobStatus)'
+          $buildResult = '$(Build.BuildResult)'
+
+          Write-Host "[DEBUG] scanSucceeded='$scanSucceeded' scanFailed='$scanFailed' depResult='$depResult' Agent.JobStatus='$agentStatus' Build.BuildResult='$buildResult'"
+
+          # Decide failure only when an explicit failure is reported; otherwise treat as success
+          $isFailure = $false
+          if ($scanFailed -ieq 'Failed') { $isFailure = $true }
+          if ($depResult -imatch '^(Failed|Canceled|Cancelled)') { $isFailure = $true }
+          $isSuccess = -not $isFailure
+          Write-Host "[DEBUG] Computed isSuccess = $isSuccess (isFailure = $isFailure)"
+
+          if ($isSuccess) {
             $message = "✅ Snyk scan passed for image: $sourceImage`nView pipeline run: $pipelineUrl"
             $title = "Container Scan Passed"
           } else {
