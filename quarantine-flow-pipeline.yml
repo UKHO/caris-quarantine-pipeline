@@ -99,7 +99,7 @@ stages:
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
           $destImage = "$(fullDestinationImageName)"
 
-          if ("$(Agent.JobStatus)" -eq "Succeeded") {
+          if ("$(dependencies.ScanContainer.result)" -eq "Succeeded") {
             $message = "✅ Snyk scan passed for image: $sourceImage`nDestination: $destImage`nView pipeline run: $pipelineUrl"
             $title = "Container Scan Passed"
           } else {
@@ -123,7 +123,6 @@ stages:
             Write-Host "Response: $response"
           } catch {
             Write-Host "Error sending notification: $_"
-          }
 
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Private ACR'
