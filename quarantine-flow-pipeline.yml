@@ -117,12 +117,11 @@ stages:
           $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
 
-          # Read the job output variables set by the scan job
-          $scanSucceeded = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusSucceeded.scanStatus''])'
-          $scanFailed = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusFailed.scanStatus''])'
-          Write-Host "scanSucceeded='$scanSucceeded' scanFailed='$scanFailed'"
+          # Use the job result produced by the ScanContainer job
+          $depResult = '$(dependencies.ScanContainer.ContainerScan.result)'.Trim()
+          Write-Host "Resolved scan job result: '$depResult'"
 
-          if ($scanSucceeded -eq 'Succeeded') {
+          if ($depResult -imatch '^Succeeded') {
             $message = "✅ Snyk scan passed for image: $sourceImage`nView pipeline run: $pipelineUrl"
             $title = "Container Scan Passed"
           } else {
@@ -201,45 +200,6 @@ stages:
         repository: '$(destinationImageRepository)'
         command: 'push'
         tags: '$(scannedImageTag)'
-
-    # Send success alert to Teams for passed scans/pushes
-    - task: PowerShell@2
-      displayName: 'Send Success Alert to Teams'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $webhookUrl = '$(teamsWebhookEndpoint)'
-          Write-Host "Webhook URL: $webhookUrl"
-          if ($webhookUrl -eq '') {
-            Write-Host "Webhook URL is empty - skipping success alert"
-            exit 0
-          }
-
-          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-          $destImage = "$(fullDestinationImageName)"
-          $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-
-          $message = "✅ Container scan passed and image pushed.`nSource: $sourceImage`nDestination: $destImage`nView pipeline run: $pipelineUrl"
-
-          $body = [ordered]@{
-            title = "Container Scan Passed"
-            message = $message
-            pipelineUrl = $pipelineUrl
-            sourceHost = "$(sourceHost)"
-            sourceRepository = "$(sourceRepository)"
-            sourceTag = "$(sourceTag)"
-            destinationImage = $destImage
-          } | ConvertTo-Json -Depth 5
-
-          Write-Host "Sending success request to Teams webhook..."
-          Write-Host "Body: $body"
-          try {
-            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
-            Write-Host "Response: $response"
-            Write-Host "Success alert sent!"
-          } catch {
-            Write-Host "Error sending success alert: $_"
-          }
 
     # Summary step
     - script: |
