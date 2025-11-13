@@ -98,6 +98,55 @@ stages:
         script: |
           Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Failed"
 
+- stage: NotifyScanResult
+  displayName: 'Notify Teams (scan-only)'
+  dependsOn: ScanContainer
+  condition: always()
+  jobs:
+  - job: SendScanOnlyNotification
+    displayName: 'Send Scan-only Teams Notification'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: PowerShell@2
+      displayName: 'Send Scan Result to Teams'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $webhookUrl = '$(teamsWebhookEndpoint)'
+          $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
+
+          # Read the job output variables set by the scan job
+          $scanSucceeded = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusSucceeded.scanStatus''])'
+          $scanFailed = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusFailed.scanStatus''])'
+          Write-Host "scanSucceeded='$scanSucceeded' scanFailed='$scanFailed'"
+
+          if ($scanSucceeded -eq 'Succeeded') {
+            $message = "✅ Snyk scan passed for image: $sourceImage`nView pipeline run: $pipelineUrl"
+            $title = "Container Scan Passed"
+          } else {
+            $message = "❌ Snyk scan failed for image: $sourceImage`nView pipeline run: $pipelineUrl"
+            $title = "Container Scan Failed"
+          }
+
+          $body = [ordered]@{
+            title = $title
+            message = $message
+            pipelineUrl = $pipelineUrl
+            sourceHost = "$(sourceHost)"
+            sourceRepository = "$(sourceRepository)"
+            sourceTag = "$(sourceTag)"
+          } | ConvertTo-Json -Depth 5
+
+          Write-Host "Sending scan-only notification to Teams..."
+          try {
+            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
+            Write-Host "Response: $response"
+          } catch {
+            Write-Host "Error sending scan-only notification: $_"
+          }
+
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Private ACR'
   dependsOn:
@@ -110,54 +159,12 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
-  - stage: NotifyScanResult
-    displayName: 'Notify Teams (scan-only)'
-    dependsOn: ScanContainer
-    condition: always()
-    jobs:
-    - job: SendScanOnlyNotification
-      displayName: 'Send Scan-only Teams Notification'
-      pool:
-        vmImage: 'ubuntu-latest'
-      steps:
-      - task: PowerShell@2
-        displayName: 'Send Scan Result to Teams'
-        inputs:
-          targetType: 'inline'
-          script: |
-            $webhookUrl = '$(teamsWebhookEndpoint)'
-            $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-            $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-
-            # Read the job output variables set by the scan job
-            $scanSucceeded = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusSucceeded.scanStatus''])'
-            $scanFailed = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusFailed.scanStatus''])'
-            Write-Host "scanSucceeded='$scanSucceeded' scanFailed='$scanFailed'"
-
-            if ($scanSucceeded -eq 'Succeeded') {
-              $message = "✅ Snyk scan passed for image: $sourceImage`nView pipeline run: $pipelineUrl"
-              $title = "Container Scan Passed"
-            } else {
-              $message = "❌ Snyk scan failed for image: $sourceImage`nView pipeline run: $pipelineUrl"
-              $title = "Container Scan Failed"
-            }
-
-            $body = [ordered]@{
-              title = $title
-              message = $message
-              pipelineUrl = $pipelineUrl
-              sourceHost = "$(sourceHost)"
-              sourceRepository = "$(sourceRepository)"
-              sourceTag = "$(sourceTag)"
-            } | ConvertTo-Json -Depth 5
-
-            Write-Host "Sending scan-only notification to Teams..."
-            try {
-              $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
-              Write-Host "Response: $response"
-            } catch {
-              Write-Host "Error sending scan-only notification: $_"
-            }
+    # Login to source registry
+    - task: Docker@2
+      displayName: 'Login to Source Registry'
+      inputs:
+        containerRegistry: '$(sourceRegistryServiceConnection)'
+        command: 'login'
     # Login to source registry
     - task: Docker@2
       displayName: 'Login to Source Registry'
