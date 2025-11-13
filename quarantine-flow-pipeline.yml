@@ -79,16 +79,85 @@ stages:
         severityThreshold: high # change to low to test teams alert
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
+    # Publish a simple scanStatus output so later stages can reliably read the scan result
+    - task: PowerShell@2
+      name: setScanStatusSucceeded
+      displayName: 'Set scanStatus succeeded output'
+      condition: succeeded()
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Succeeded"
+
+    - task: PowerShell@2
+      name: setScanStatusFailed
+      displayName: 'Set scanStatus failed output'
+      condition: failed()
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Failed"
+
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Private ACR'
-  dependsOn: ScanContainer
-  condition: succeeded()
+  dependsOn:
+    - ScanContainer
+    - NotifyScanResult
+  condition: and(succeeded(), eq(dependencies.ScanContainer.result, 'Succeeded'))
   jobs:
   - job: PullTagAndPush
     displayName: 'Pull, Tag and Push the image to the Private ACR'
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+  - stage: NotifyScanResult
+    displayName: 'Notify Teams (scan-only)'
+    dependsOn: ScanContainer
+    condition: always()
+    jobs:
+    - job: SendScanOnlyNotification
+      displayName: 'Send Scan-only Teams Notification'
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+      - task: PowerShell@2
+        displayName: 'Send Scan Result to Teams'
+        inputs:
+          targetType: 'inline'
+          script: |
+            $webhookUrl = '$(teamsWebhookEndpoint)'
+            $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+            $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
+
+            # Read the job output variables set by the scan job
+            $scanSucceeded = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusSucceeded.scanStatus''])'
+            $scanFailed = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusFailed.scanStatus''])'
+            Write-Host "scanSucceeded='$scanSucceeded' scanFailed='$scanFailed'"
+
+            if ($scanSucceeded -eq 'Succeeded') {
+              $message = "✅ Snyk scan passed for image: $sourceImage`nView pipeline run: $pipelineUrl"
+              $title = "Container Scan Passed"
+            } else {
+              $message = "❌ Snyk scan failed for image: $sourceImage`nView pipeline run: $pipelineUrl"
+              $title = "Container Scan Failed"
+            }
+
+            $body = [ordered]@{
+              title = $title
+              message = $message
+              pipelineUrl = $pipelineUrl
+              sourceHost = "$(sourceHost)"
+              sourceRepository = "$(sourceRepository)"
+              sourceTag = "$(sourceTag)"
+            } | ConvertTo-Json -Depth 5
+
+            Write-Host "Sending scan-only notification to Teams..."
+            try {
+              $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
+              Write-Host "Response: $response"
+            } catch {
+              Write-Host "Error sending scan-only notification: $_"
+            }
     # Login to source registry
     - task: Docker@2
       displayName: 'Login to Source Registry'
@@ -170,65 +239,5 @@ stages:
         echo "✅ Container scanning and push completed successfully!"
         echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
         echo "Destination image: $(fullDestinationImageName)"
-        echo "Source repository: $(sourceRepository)"
-      displayName: 'Pipeline Summary'
-
-- stage: AlertOnFail
-  displayName: 'Alert that vulnerable image present'
-  dependsOn: ScanContainer
-  condition: failed()
-  jobs:
-  - job: SendTeamsMessage
-    displayName: 'Send Alert to Teams Channel'
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - task: PowerShell@2
-      displayName: 'Send Alert'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $webhookUrl = '$(teamsWebhookEndpoint)'
-          Write-Host "Webhook URL: $webhookUrl"
-          
-          if ($webhookUrl -eq '') {
-            Write-Host "Webhook URL is empty - skipping alert"
-            exit 0
-          }
-          
-          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-          Write-Host "Source image: $sourceImage"
-          
-          $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-
-          # Use a plain URL in the message so Teams auto-links it (works even if Power Automate doesn't render Markdown)
-          $messageWithUrl = "Container scanning failed for image: $sourceImage`nView pipeline run: $pipelineUrl"
-
-          $body = [ordered]@{
-            title = "Container Scanning Failed"
-            message = $messageWithUrl
-            pipelineUrl = $pipelineUrl
-            sourceHost = "$(sourceHost)"
-            sourceRepository = "$(sourceRepository)"
-            sourceTag = "$(sourceTag)"
-          } | ConvertTo-Json -Depth 5
-          
-          Write-Host "Sending request to Teams webhook..."
-          Write-Host "Body: $body"
-          
-          try {
-            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
-            Write-Host "Response: $response"
-            Write-Host "Alert sent successfully!"
-          } catch {
-            Write-Host "Error sending alert: $_"
-            Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
-            Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
-          }
-
-    # Summary step
-    - script: |
-        echo "❌Container scanning and push completed unsuccessfully!"
-        echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
         echo "Source repository: $(sourceRepository)"
       displayName: 'Pipeline Summary'
