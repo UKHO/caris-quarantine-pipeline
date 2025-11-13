@@ -123,6 +123,7 @@ stages:
             Write-Host "Response: $response"
           } catch {
             Write-Host "Error sending notification: $_"
+          }
 
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Private ACR'
