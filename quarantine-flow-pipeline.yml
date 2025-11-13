@@ -79,6 +79,51 @@ stages:
         severityThreshold: high # change to low to test teams alert
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
+- stage: NotifyTeams
+  displayName: 'Notify Teams of Scan Result'
+  dependsOn: ScanContainer
+  condition: always()
+  jobs:
+  - job: SendTeamsNotification
+    displayName: 'Send Teams Notification'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: PowerShell@2
+      displayName: 'Send Teams Notification'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $webhookUrl = '$(teamsWebhookEndpoint)'
+          $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
+          $destImage = "$(fullDestinationImageName)"
+
+          if ("$(Agent.JobStatus)" -eq "Succeeded") {
+            $message = "✅ Snyk scan passed for image: $sourceImage`nDestination: $destImage`nView pipeline run: $pipelineUrl"
+            $title = "Container Scan Passed"
+          } else {
+            $message = "❌ Snyk scan failed for image: $sourceImage`nView pipeline run: $pipelineUrl"
+            $title = "Container Scan Failed"
+          }
+
+          $body = [ordered]@{
+            title = $title
+            message = $message
+            pipelineUrl = $pipelineUrl
+            sourceHost = "$(sourceHost)"
+            sourceRepository = "$(sourceRepository)"
+            sourceTag = "$(sourceTag)"
+            destinationImage = $destImage
+          } | ConvertTo-Json -Depth 5
+
+          Write-Host "Sending notification to Teams..."
+          try {
+            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
+            Write-Host "Response: $response"
+          } catch {
+            Write-Host "Error sending notification: $_"
+
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Private ACR'
   dependsOn: ScanContainer
@@ -126,109 +171,10 @@ stages:
         command: 'push'
         tags: '$(scannedImageTag)'
 
-    # Send success alert to Teams for passed scans/pushes
-    - task: PowerShell@2
-      displayName: 'Send Success Alert to Teams'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $webhookUrl = '$(teamsWebhookEndpoint)'
-          Write-Host "Webhook URL: $webhookUrl"
-          if ($webhookUrl -eq '') {
-            Write-Host "Webhook URL is empty - skipping success alert"
-            exit 0
-          }
-
-          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-          $destImage = "$(fullDestinationImageName)"
-          $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-
-          $message = "✅ Container scan passed and image pushed.`nSource: $sourceImage`nDestination: $destImage`nView pipeline run: $pipelineUrl"
-
-          $body = [ordered]@{
-            title = "Container Scan Passed"
-            message = $message
-            pipelineUrl = $pipelineUrl
-            sourceHost = "$(sourceHost)"
-            sourceRepository = "$(sourceRepository)"
-            sourceTag = "$(sourceTag)"
-            destinationImage = $destImage
-          } | ConvertTo-Json -Depth 5
-
-          Write-Host "Sending success request to Teams webhook..."
-          Write-Host "Body: $body"
-          try {
-            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
-            Write-Host "Response: $response"
-            Write-Host "Success alert sent!"
-          } catch {
-            Write-Host "Error sending success alert: $_"
-          }
-
     # Summary step
     - script: |
         echo "✅ Container scanning and push completed successfully!"
         echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
         echo "Destination image: $(fullDestinationImageName)"
-        echo "Source repository: $(sourceRepository)"
-      displayName: 'Pipeline Summary'
-
-- stage: AlertOnFail
-  displayName: 'Alert that vulnerable image present'
-  dependsOn: ScanContainer
-  condition: failed()
-  jobs:
-  - job: SendTeamsMessage
-    displayName: 'Send Alert to Teams Channel'
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - task: PowerShell@2
-      displayName: 'Send Alert'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $webhookUrl = '$(teamsWebhookEndpoint)'
-          Write-Host "Webhook URL: $webhookUrl"
-          
-          if ($webhookUrl -eq '') {
-            Write-Host "Webhook URL is empty - skipping alert"
-            exit 0
-          }
-          
-          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-          Write-Host "Source image: $sourceImage"
-          
-          $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-
-          # Use a plain URL in the message so Teams auto-links it (works even if Power Automate doesn't render Markdown)
-          $messageWithUrl = "Container scanning failed for image: $sourceImage`nView pipeline run: $pipelineUrl"
-
-          $body = [ordered]@{
-            title = "Container Scanning Failed"
-            message = $messageWithUrl
-            pipelineUrl = $pipelineUrl
-            sourceHost = "$(sourceHost)"
-            sourceRepository = "$(sourceRepository)"
-            sourceTag = "$(sourceTag)"
-          } | ConvertTo-Json -Depth 5
-          
-          Write-Host "Sending request to Teams webhook..."
-          Write-Host "Body: $body"
-          
-          try {
-            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
-            Write-Host "Response: $response"
-            Write-Host "Alert sent successfully!"
-          } catch {
-            Write-Host "Error sending alert: $_"
-            Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
-            Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
-          }
-
-    # Summary step
-    - script: |
-        echo "❌Container scanning and push completed unsuccessfully!"
-        echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
         echo "Source repository: $(sourceRepository)"
       displayName: 'Pipeline Summary'
