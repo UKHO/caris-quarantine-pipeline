@@ -10,39 +10,47 @@ resources:
           value: "application/vnd.oci.image.index.v1+json"
 
 variables:
-  # Source registry variables
+  # Source registry variables (FROM WEBHOOK)
+  - name: sourceRepository
+    value: ${{ resources.webhooks.AcrWebhookTrigger.target.repository }}
+
+  - name: sourceTag
+    value: ${{ resources.webhooks.AcrWebhookTrigger.target.tag }}
+
+  - name: sourceHost
+    value: ${{ resources.webhooks.AcrWebhookTrigger.request.host }}
+
   - name: sourceRegistryServiceConnection
     value: 'publiccrlive-docker'
-  - name: sourceRepository
-    value: ${{ parameters.AcrWebhookTrigger.target.repository }}
-  - name: sourceTag
-    value: ${{ parameters.AcrWebhookTrigger.target.tag }}
-  - name: sourceHost
-    value: ${{ parameters.AcrWebhookTrigger.request.host }}
-  
+
   # Destination registry variables
   - name: destinationRegistryServiceConnection
     value: 'carisliveacr-docker'
+
   - name: destinationRegistry
     value: 'carisliveacr.azurecr.io'
+
   - name: destinationImageRepository
     value: 'scanned/$(sourceRepository)'
-  
+
   # Snyk variables
   - name: snykServiceConnection
     value: 'SnykAuth'
+  
   - name: snykOrganization
     value: 'caris-cloud'
-  
+
   # Build variables
   - name: scannedImageTag
     value: '$(sourceTag)-snyk-scanned'
+
   - name: fullDestinationImageName
     value: '$(destinationRegistry)/$(destinationImageRepository):$(scannedImageTag)'
 
   # Teams webhook
   - name: teamsWebhookEndpoint
     value: 'https://d217d034da18e574a33262c48b5477.aa.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/c67bbc4f253c448c8ec846386c3d9c2d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=1OVhyr6Nz66emPn1n4l7f0mdc2x0NITBZijEfnO4Krw'
+
 
 stages:
 - stage: ScanContainer
@@ -53,6 +61,7 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+
     - task: Docker@2
       displayName: 'Login to Source Registry'
       inputs:
@@ -62,9 +71,9 @@ stages:
     - task: PowerShell@2
       displayName: 'Pull Published Image'
       inputs:
-        targetType: 'inline'
+        targetType: inline
         script: |
-          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+          docker pull "$(sourceHost)/$(sourceRepository):$(sourceTag)"
 
     - task: UkhoSnykScanTask@0
       displayName: 'Snyk container scan'
@@ -77,14 +86,15 @@ stages:
         severityThreshold: high
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
-    # Single consolidated scanStatus output
+    # Create scan status output
     - task: PowerShell@2
       name: setScanStatus
       displayName: 'Set scanStatus output'
       condition: always()
       inputs:
-        targetType: 'inline'
+        targetType: inline
         script: |
+          Write-Host "Agent.JobStatus=$(Agent.JobStatus)"
           if ("$(Agent.JobStatus)" -eq "Succeeded") {
             Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Succeeded"
           } else {
@@ -104,21 +114,22 @@ stages:
     - task: PowerShell@2
       displayName: 'Send Scan Result to Teams'
       inputs:
-        targetType: 'inline'
+        targetType: inline
         script: |
-          $webhookUrl = '$(teamsWebhookEndpoint)'
+          $webhookUrl = "$(teamsWebhookEndpoint)"
           $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
 
-          $scanStatus = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatus.scanStatus''])'.Trim()
+          $scanStatus = "$(dependencies.ScanContainer.outputs['ContainerScan.setScanStatus.scanStatus'])".Trim()
+
           Write-Host "[DEBUG] scanStatus='$scanStatus'"
 
-          if ($scanStatus -ieq 'Succeeded') {
-            $message = "✅ Snyk scan completed successfully for image: $sourceImage`nView pipeline run: $pipelineUrl"
+          if ($scanStatus -ieq "Succeeded") {
             $title = "Container Scan Completed"
+            $message = "✅ Snyk scan completed successfully for image: $sourceImage`nView pipeline run: $pipelineUrl"
           } else {
-            $message = "❌ Snyk scan failed for image: $sourceImage`nView pipeline run: $pipelineUrl"
             $title = "Container Scan Failed"
+            $message = "❌ Snyk scan failed for image: $sourceImage`nView pipeline run: $pipelineUrl"
           }
 
           $body = [ordered]@{
@@ -130,7 +141,6 @@ stages:
             sourceTag = "$(sourceTag)"
           } | ConvertTo-Json -Depth 5
 
-          Write-Host "Sending scan-only notification to Teams..."
           Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
 
 - stage: PushToPrivateRepo
@@ -138,13 +148,18 @@ stages:
   dependsOn:
     - ScanContainer
     - NotifyScanResult
-  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.setScanStatus.scanStatus'], 'Succeeded'))
+  condition: |
+    and(
+      succeeded(),
+      eq(dependencies.ScanContainer.outputs['ContainerScan.setScanStatus.scanStatus'], 'Succeeded')
+    )
   jobs:
   - job: PullTagAndPush
     displayName: 'Pull, Tag and Push the image to the Private ACR'
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+
     - task: Docker@2
       displayName: 'Login to Source Registry'
       inputs:
@@ -154,9 +169,9 @@ stages:
     - task: PowerShell@2
       displayName: 'Pull Published Image'
       inputs:
-        targetType: 'inline'
+        targetType: inline
         script: |
-          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+          docker pull "$(sourceHost)/$(sourceRepository):$(sourceTag)"
 
     - task: Docker@2
       displayName: 'Login to Destination Registry'
@@ -167,7 +182,7 @@ stages:
     - task: Docker@2
       displayName: 'Tag Image as Snyk Scanned'
       inputs:
-        command: 'tag'
+        command: tag
         arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullDestinationImageName)'
 
     - task: Docker@2
@@ -175,7 +190,7 @@ stages:
       inputs:
         containerRegistry: '$(destinationRegistryServiceConnection)'
         repository: '$(destinationImageRepository)'
-        command: 'push'
+        command: push
         tags: '$(scannedImageTag)'
 
     - script: |
