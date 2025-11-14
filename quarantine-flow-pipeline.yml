@@ -10,165 +10,49 @@ resources:
           value: "application/vnd.oci.image.index.v1+json"
 
 variables:
-  # Static variables only
+  # Source registry variables - these are populated from the webhook trigger
   - name: sourceRegistryServiceConnection
     value: 'publiccrlive-docker'
-
+  - name: sourceRepository
+    value: ${{ parameters.AcrWebhookTrigger.target.repository }}
+  - name: sourceTag
+    value: ${{ parameters.AcrWebhookTrigger.target.tag }}
+  - name: sourceHost
+    value: ${{ parameters.AcrWebhookTrigger.request.host }}
+  
+  # Destination registry variables
   - name: destinationRegistryServiceConnection
-    value: 'carisliveacr-docker'
-
+    value: 'publiccrlive-docker'
   - name: destinationRegistry
-    value: 'carisliveacr.azurecr.io'
-
+    value: 'publiccrlive.azurecr.io'
+  - name: destinationImageRepository
+    value: 'scanned/$(sourceRepository)'
+  
+  # Snyk variables
   - name: snykServiceConnection
     value: 'SnykAuth'
-
   - name: snykOrganization
     value: 'caris-cloud'
+  
+  # Build variables
+  - name: scannedImageTag
+    value: '$(sourceTag)-snyk-scanned'
+  - name: fullDestinationImageName
+    value: '$(destinationRegistry)/$(destinationImageRepository):$(scannedImageTag)'
 
+  # Alert Variable
   - name: teamsWebhookEndpoint
     value: 'https://d217d034da18e574a33262c48b5477.aa.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/c67bbc4f253c448c8ec846386c3d9c2d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=1OVhyr6Nz66emPn1n4l7f0mdc2x0NITBZijEfnO4Krw'
 
-
 stages:
 - stage: ScanContainer
-  displayName: "Scan Container"
+  displayName: 'Scan Container'
   jobs:
   - job: ContainerScan
-    displayName: "Scan Pushed Image"
-    pool:
-      vmImage: 'ubuntu-latest'
+    displayName: 'Scan Pushed Image'
+    pool: Mare Nectaris
     steps:
-
-    # Extract webhook values into pipeline variables
-    - task: PowerShell@2
-      name: SetWebhookVars
-      displayName: "Extract webhook payload values"
-      inputs:
-        targetType: inline
-        script: |
-          Write-Host "Extracting webhook values..."
-          Write-Host "##vso[task.setvariable variable=sourceRepository;isOutput=true]${{ resources.webhooks.AcrWebhookTrigger.target.repository }}"
-          Write-Host "##vso[task.setvariable variable=sourceTag;isOutput=true]${{ resources.webhooks.AcrWebhookTrigger.target.tag }}"
-          Write-Host "##vso[task.setvariable variable=sourceHost;isOutput=true]${{ resources.webhooks.AcrWebhookTrigger.request.host }}"
-
     # Login to source registry
-    - task: Docker@2
-      displayName: "Login to Source Registry"
-      inputs:
-        containerRegistry: '$(sourceRegistryServiceConnection)'
-        command: 'login'
-
-    # Pull image
-    - task: PowerShell@2
-      displayName: 'Pull Published Image'
-      inputs:
-        targetType: inline
-        script: |
-          docker pull "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-
-    # Perform snyk scan
-    - task: UkhoSnykScanTask@0
-      displayName: 'Snyk container scan'
-      inputs:
-        failOnIssues: true
-        organization: '$(snykOrganization)'
-        serviceConnectionEndpoint: '$(snykServiceConnection)'
-        testType: container
-        monitorWhen: never
-        severityThreshold: high
-        dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
-
-    # Set scanStatus output variable
-    - task: PowerShell@2
-      name: setScanStatus
-      displayName: "Set scanStatus output"
-      condition: always()
-      inputs:
-        targetType: inline
-        script: |
-          Write-Host "Agent.JobStatus=$(Agent.JobStatus)"
-          if ("$(Agent.JobStatus)" -eq "Succeeded") {
-            Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Succeeded"
-          }
-          else {
-            Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Failed"
-          }
-
-- stage: NotifyScanResult
-  displayName: 'Notify Teams (scan-only)'
-  dependsOn: ScanContainer
-  condition: always()
-  jobs:
-  - job: SendScanOnlyNotification
-    displayName: 'Send Scan-only Teams Notification'
-    pool:
-      vmImage: 'ubuntu-latest'
-    variables:
-      sourceRepository: $[ dependencies.ScanContainer.outputs['ContainerScan.SetWebhookVars.sourceRepository'] ]
-      sourceTag:        $[ dependencies.ScanContainer.outputs['ContainerScan.SetWebhookVars.sourceTag'] ]
-      sourceHost:       $[ dependencies.ScanContainer.outputs['ContainerScan.SetWebhookVars.sourceHost'] ]
-      scanStatus:       $[ dependencies.ScanContainer.outputs['ContainerScan.setScanStatus.scanStatus'] ]
-
-    steps:
-    - task: PowerShell@2
-      displayName: 'Send Scan Result to Teams'
-      inputs:
-        targetType: inline
-        script: |
-          $webhookUrl = "$(teamsWebhookEndpoint)"
-          $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-
-          $scanStatus = "$(scanStatus)".Trim()
-
-          if ($scanStatus -ieq "Succeeded") {
-            $title = "Container Scan Completed"
-            $message = "✅ Snyk scan completed successfully for image: $sourceImage`nView pipeline run: $pipelineUrl"
-          }
-          else {
-            $title = "Container Scan Failed"
-            $message = "❌ Snyk scan failed for image: $sourceImage`nView pipeline run: $pipelineUrl"
-          }
-
-          $body = [ordered]@{
-            title = $title
-            message = $message
-            pipelineUrl = $pipelineUrl
-            sourceHost = "$(sourceHost)"
-            sourceRepository = "$(sourceRepository)"
-            sourceTag = "$(sourceTag)"
-          } | ConvertTo-Json -Depth 5
-
-          Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
-
-- stage: PushToPrivateRepo
-  displayName: 'Push passed image to Private ACR'
-  dependsOn:
-    - ScanContainer
-    - NotifyScanResult
-  condition: |
-    and(
-      succeeded(),
-      eq(dependencies.ScanContainer.outputs['ContainerScan.setScanStatus.scanStatus'], 'Succeeded')
-    )
-  jobs:
-  - job: PullTagAndPush
-    displayName: 'Pull, Tag and Push the image to the Private ACR'
-    pool:
-      vmImage: 'ubuntu-latest'
-
-    variables:
-      sourceRepository: $[ dependencies.ScanContainer.outputs['ContainerScan.SetWebhookVars.sourceRepository'] ]
-      sourceTag:        $[ dependencies.ScanContainer.outputs['ContainerScan.SetWebhookVars.sourceTag'] ]
-      sourceHost:       $[ dependencies.ScanContainer.outputs['ContainerScan.SetWebhookVars.sourceHost'] ]
-
-      scannedImageTag: "$(sourceTag)-snyk-scanned"
-      destinationImageRepository: "scanned/$(sourceRepository)"
-      fullDestinationImageName: "$(destinationRegistry)/$(destinationImageRepository):$(scannedImageTag)"
-
-    steps:
-
     - task: Docker@2
       displayName: 'Login to Source Registry'
       inputs:
@@ -178,32 +62,178 @@ stages:
     - task: PowerShell@2
       displayName: 'Pull Published Image'
       inputs:
-        targetType: inline
+        targetType: 'inline'
         script: |
-          docker pull "$(sourceHost)/$(sourceRepository):$(sourceTag)"
+          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
 
+    # Snyk scan using UkhoSnykScanTask
+    - task: UkhoSnykScanTask@0
+      displayName: 'Snyk container scan'
+      inputs:
+        failOnIssues: true
+        organization: '$(snykOrganization)'
+        serviceConnectionEndpoint: '$(snykServiceConnection)'
+        testType: container
+        monitorWhen: never
+        severityThreshold: high # change to low to test teams alert
+        dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
+
+- stage: PushToPrivateRepo
+  displayName: 'Push passed image to Private ACR'
+  dependsOn: ScanContainer
+  condition: succeeded()
+  jobs:
+  - job: PullTagAndPush
+    displayName: 'Pull, Tag and Push the image to the Private ACR'
+    pool: Mare Nectaris
+    steps:
+    # Login to source registry
+    - task: Docker@2
+      displayName: 'Login to Source Registry'
+      inputs:
+        containerRegistry: '$(sourceRegistryServiceConnection)'
+        command: 'login'
+
+    - task: PowerShell@2
+      displayName: 'Pull Published Image'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+
+    # Login to destination registry
     - task: Docker@2
       displayName: 'Login to Destination Registry'
       inputs:
         containerRegistry: '$(destinationRegistryServiceConnection)'
         command: 'login'
 
+    # Tag the image with snyk-scanned suffix
     - task: Docker@2
       displayName: 'Tag Image as Snyk Scanned'
       inputs:
-        command: tag
+        command: 'tag'
         arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullDestinationImageName)'
 
+    # Push the tagged image to destination registry
     - task: Docker@2
       displayName: 'Push Scanned Image to Destination Registry'
       inputs:
         containerRegistry: '$(destinationRegistryServiceConnection)'
         repository: '$(destinationImageRepository)'
-        command: push
+        command: 'push'
         tags: '$(scannedImageTag)'
 
+    # Summary step
     - script: |
         echo "✅ Container scanning and push completed successfully!"
         echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
         echo "Destination image: $(fullDestinationImageName)"
+        echo "Source repository: $(sourceRepository)"
+      displayName: 'Pipeline Summary'
+
+- stage: AlertOnSuccess
+  displayName: 'Alert that scan completed successfully'
+  dependsOn: PushToPrivateRepo
+  condition: succeeded()
+  jobs:
+  - job: SendSuccessTeamsMessage
+    displayName: 'Send Success Alert to Teams Channel'
+    pool: Mare Nectaris
+    steps:
+    - task: PowerShell@2
+      displayName: 'Send Success Alert'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $webhookUrl = '$(teamsWebhookEndpoint)'
+          Write-Host "Webhook URL: $webhookUrl"
+          
+          if ($webhookUrl -eq '') {
+            Write-Host "Webhook URL is empty - skipping alert"
+            exit 0
+          }
+          
+          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
+          $destinationImage = "$(fullDestinationImageName)"
+          Write-Host "Source image: $sourceImage"
+          Write-Host "Destination image: $destinationImage"
+          
+          $body = @{
+            title = "Container Scan Completed Successfully"
+            message = "Container scanning passed and image has been pushed to private registry."
+            status = "success"
+            sourceHost = "$(sourceHost)"
+            sourceRepository = "$(sourceRepository)"
+            sourceTag = "$(sourceTag)"
+            destinationImage = $destinationImage
+            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          } | ConvertTo-Json
+          
+          Write-Host "Sending request to Teams webhook..."
+          Write-Host "Body: $body"
+          
+          try {
+            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
+            Write-Host "Response: $response"
+            Write-Host "Success alert sent successfully!"
+          } catch {
+            Write-Host "Error sending alert: $_"
+            Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+            Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
+          }
+
+- stage: AlertOnFail
+  displayName: 'Alert that vulnerable image present'
+  dependsOn: ScanContainer
+  condition: failed()
+  jobs:
+  - job: SendFailureTeamsMessage
+    displayName: 'Send Failure Alert to Teams Channel'
+    pool: Mare Nectaris
+    steps:
+    - task: PowerShell@2
+      displayName: 'Send Failure Alert'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $webhookUrl = '$(teamsWebhookEndpoint)'
+          Write-Host "Webhook URL: $webhookUrl"
+          
+          if ($webhookUrl -eq '') {
+            Write-Host "Webhook URL is empty - skipping alert"
+            exit 0
+          }
+          
+          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
+          Write-Host "Source image: $sourceImage"
+          
+          $body = @{
+            title = "Container Scan Failed"
+            message = "Container scanning failed due to vulnerabilities detected in image: $sourceImage"
+            status = "failure"
+            sourceHost = "$(sourceHost)"
+            sourceRepository = "$(sourceRepository)"
+            sourceTag = "$(sourceTag)"
+            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          } | ConvertTo-Json
+          
+          Write-Host "Sending request to Teams webhook..."
+          Write-Host "Body: $body"
+          
+          try {
+            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
+            Write-Host "Response: $response"
+            Write-Host "Failure alert sent successfully!"
+          } catch {
+            Write-Host "Error sending alert: $_"
+            Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+            Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
+          }
+
+    # Summary step
+    - script: |
+        echo "❌ Container scanning failed!"
+        echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
+        echo "Source repository: $(sourceRepository)"
       displayName: 'Pipeline Summary'
