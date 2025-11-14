@@ -76,27 +76,22 @@ stages:
         serviceConnectionEndpoint: '$(snykServiceConnection)'
         testType: container
         monitorWhen: never
-        severityThreshold: high # change to low to test teams alert
+        severityThreshold: high
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
-    # Publish a simple scanStatus output so later stages can reliably read the scan result
+    # Consolidated scanStatus output
     - task: PowerShell@2
-      name: setScanStatusSucceeded
-      displayName: 'Set scanStatus succeeded output'
-      condition: succeeded()
+      name: setScanStatus
+      displayName: 'Set scanStatus output'
+      condition: always()
       inputs:
         targetType: 'inline'
         script: |
-          Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Succeeded"
-
-    - task: PowerShell@2
-      name: setScanStatusFailed
-      displayName: 'Set scanStatus failed output'
-      condition: failed()
-      inputs:
-        targetType: 'inline'
-        script: |
-          Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Failed"
+          if ("$(Agent.JobStatus)" -eq "Succeeded") {
+            Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Succeeded"
+          } else {
+            Write-Host "##vso[task.setvariable variable=scanStatus;isOutput=true]Failed"
+          }
 
 - stage: NotifyScanResult
   displayName: 'Notify Teams (scan-only)'
@@ -117,27 +112,11 @@ stages:
           $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
 
-          # Prefer the explicit job-output variables set by the ScanContainer job
-          $scanSucceeded = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusSucceeded.scanStatus''])'.Trim()
-          $scanFailed = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatusFailed.scanStatus''])'.Trim()
+          $scanStatus = '$(dependencies.ScanContainer.outputs[''ContainerScan.setScanStatus.scanStatus''])'.Trim()
 
-          # Fallback to job/stage result if outputs are not present
-          $depResult = '$(dependencies.ScanContainer.ContainerScan.result)'.Trim()
+          Write-Host "[DEBUG] scanStatus='$scanStatus'"
 
-          # Also log Agent and Build-level statuses for debugging
-          $agentStatus = '$(Agent.JobStatus)'
-          $buildResult = '$(Build.BuildResult)'
-
-          Write-Host "[DEBUG] scanSucceeded='$scanSucceeded' scanFailed='$scanFailed' depResult='$depResult' Agent.JobStatus='$agentStatus' Build.BuildResult='$buildResult'"
-
-          # Decide failure only when an explicit failure is reported; otherwise treat as success
-          $isFailure = $false
-          if ($scanFailed -ieq 'Failed') { $isFailure = $true }
-          if ($depResult -imatch '^(Failed|Canceled|Cancelled)') { $isFailure = $true }
-          $isSuccess = -not $isFailure
-          Write-Host "[DEBUG] Computed isSuccess = $isSuccess (isFailure = $isFailure)"
-
-          if ($isSuccess) {
+          if ($scanStatus -ieq 'Succeeded') {
             $message = "✅ Snyk scan passed for image: $sourceImage`nView pipeline run: $pipelineUrl"
             $title = "Container Scan Passed"
           } else {
@@ -167,20 +146,13 @@ stages:
   dependsOn:
     - ScanContainer
     - NotifyScanResult
-  condition: and(succeeded(), eq(dependencies.ScanContainer.result, 'Succeeded'))
+  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.setScanStatus.scanStatus'], 'Succeeded'))
   jobs:
   - job: PullTagAndPush
     displayName: 'Pull, Tag and Push the image to the Private ACR'
     pool:
       vmImage: 'ubuntu-latest'
     steps:
-    # Login to source registry
-    - task: Docker@2
-      displayName: 'Login to Source Registry'
-      inputs:
-        containerRegistry: '$(sourceRegistryServiceConnection)'
-        command: 'login'
-    # Login to source registry
     - task: Docker@2
       displayName: 'Login to Source Registry'
       inputs:
@@ -194,21 +166,18 @@ stages:
         script: |
           docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
 
-    # Login to destination registry
     - task: Docker@2
       displayName: 'Login to Destination Registry'
       inputs:
         containerRegistry: '$(destinationRegistryServiceConnection)'
         command: 'login'
 
-    # Tag the image with snyk-scanned suffix
     - task: Docker@2
       displayName: 'Tag Image as Snyk Scanned'
       inputs:
         command: 'tag'
         arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullDestinationImageName)'
 
-    # Push the tagged image to destination registry
     - task: Docker@2
       displayName: 'Push Scanned Image to Destination Registry'
       inputs:
@@ -217,7 +186,6 @@ stages:
         command: 'push'
         tags: '$(scannedImageTag)'
 
-    # Summary step
     - script: |
         echo "✅ Container scanning and push completed successfully!"
         echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
