@@ -1,75 +1,64 @@
 # CARIS Quarantine Pipeline
 
-An Azure DevOps pipeline that implements a container quarantine flow for enhanced security. This pipeline automatically scans Docker container images for vulnerabilities using Snyk and only promotes clean images to a private registry.
+An Azure DevOps pipeline that implements a quarantine flow for container images: it scans images pushed to a source registry with Snyk, notifies on failures, and promotes (pushes) clean images to a private Azure Container Registry (ACR) under a `scanned/` namespace.
 
-## Overview
+This README documents the practical configuration details, variable and service-connection names the pipeline expects, and a few operational notes to avoid common runtime pitfalls.
 
-This pipeline provides an automated security gate for container images by:
-1. **Triggering** on container registry webhooks when new images are pushed
-2. **Scanning** images for security vulnerabilities using Snyk
-3. **Promoting** clean images to a secure private registry
-4. **Alerting** on failed scans to prevent vulnerable images from being deployed
+## What the pipeline does
+- Listens for ACR webhook pushes
+- Pulls the pushed image and runs a Snyk container scan
+- If the scan passes, tags the image with `-snyk-scanned` and pushes it to the private ACR
+- Sends Teams alerts on failure or success (based on configured webhook)
 
-## Pipeline Flow
+## Key files
+- `quarantine-flow-pipeline.yml` — main pipeline YAML (webhook resource, stages: ScanContainer, PushToPrivateRepo, AlertOnSuccess, AlertOnFail)
 
-### 1. Webhook Trigger
-- Monitors Azure Container Registry (ACR) for new image pushes
-- Triggers automatically when images with media type `application/vnd.oci.image.index.v1+json` are pushed
-- Extracts image details (repository, tag, host) from the webhook payload
+## Important variables / service connection names (used by the pipeline)
+- `sourceRegistryServiceConnection` — e.g. `publiccrlive-docker` (service connection for the source/public registry)
+- `destinationRegistryServiceConnection` — e.g. `carisliveacr-docker` (service connection for the private ACR)
+- `destinationRegistry` — e.g. `carisliveacr.azurecr.io`
+- `snykServiceConnection` — must match your Snyk service connection name (pipeline uses `SnykAuth` by default)
+- `snykOrganization` — Snyk org (defaults to `caris-cloud`)
+- `teamsWebhookEndpoint` — Power Automate / Teams incoming webhook URL (recommend storing this as a secret variable)
 
-### 2. Container Scanning Stage
-- **Pulls** the newly pushed image from the source registry
-- **Scans** the image using Snyk container scanning with:
-  - Organization: `caris-cloud`
-  - Severity threshold: `high` (fails on high/critical vulnerabilities)
-  - Fail-fast behavior to prevent vulnerable images from proceeding
+Note: the pipeline also includes a `SetWebhookVars` step that extracts webhook payload values and sets runtime variables like `sourceRepository`, `sourceTag`, `sourceHost` (this avoids relying on compile-time expansions which can be empty for webhooks).
 
-### 3. Image Promotion Stage (On Success)
-- **Executes** only if the security scan passes
-- **Pulls** the verified image from source registry
-- **Tags** the image with `-snyk-scanned` suffix to indicate it has passed security checks
-- **Pushes** the tagged image to the destination registry under the `scanned/` repository prefix
+## Recommended setup checklist
+1. Create the Docker/ACR service connections in Azure DevOps with names above (or update the YAML to match your names).
+2. Give the destination service principal AcrPush permissions on the destination ACR.
+3. Install the UkhoSnykScanTask extension (or ensure the Snyk scanning task you use is available).
+4. Add the Teams webhook URL as a secret pipeline variable (do NOT commit it in the repo). Example variable name: `teamsWebhookEndpoint` (set its value in the pipeline variable group and mark as secret).
+5. Configure the ACR webhook to call the DevOps webhook connection `AcrWebhookTrigger` and ensure the webhook payload contains `target.repository`, `target.tag`, and `request.host`.
 
-### 4. Alert Stage (On Failure)
-- **Triggers** only if the security scan fails
-- **Sends** Teams notification (if webhook endpoint is configured) about the vulnerable image
-- **Logs** failure details for audit purposes
+## Agents and networking
+- The pipeline can run on Microsoft-hosted agents (`ubuntu-latest`) or on your self-hosted VMSS (for example `Mare Nectaris`).
+- If you need access to a private ACR over a private endpoint or restricted network, use a self-hosted agent that has the correct network path. Microsoft-hosted agents will not be able to reach private endpoints.
 
-## Configuration
+## Troubleshooting tips
+- If a stage pushes to the wrong registry, add a debug echo step before tagging/pushing to show the expanded values:
 
-### Required Service Connections
-- `source-docker-registry-connection`: Access to the source container registry
-- `destination-docker-registry-connection`: Access to the destination private registry
-- `Snyk Auth`: Snyk service connection for vulnerability scanning
-- `Service URL`: For webhook is quite specific - https://dev.azure.com/ukhydro/_apis/public/distributedtask/webhooks/AcrWebhookTrigger?api-version=6.0-preview
+  - echo "Destination service connection: $(destinationRegistryServiceConnection)"
+  - echo "Full destination image: $(fullDestinationImageName)"
 
-### Variables
-- **Source Registry**: Configured via webhook trigger
-- **Destination Registry**: `myregistry.azurecr.io`
-- **Snyk Organization**: `caris-cloud`
-- **Teams Webhook**: Optional notification endpoint for scan failures
+- If the Teams notification shows the wrong status, verify the job output variables. The pipeline uses per-condition output steps to set `scanStatus` (Succeeded/Failed). Check that the notifier reads the dependency outputs from the `ContainerScan` job.
 
-## Image Naming Convention
+- If webhook-derived variables are empty, ensure the webhook resource is configured correctly and that the pipeline extracts them at runtime (the `SetWebhookVars` step uses `resources.webhooks.AcrWebhookTrigger` to populate runtime variables).
 
-**Source**: `{source-registry}/{repository}:{tag}`
-
-**Destination**: `acrghpmcitodev.azurecr.io/scanned/{repository}:{tag}-snyk-scanned`
+## Image naming convention
+- Source: `{source-registry}/{repository}:{tag}`
+- Destination: `{destinationRegistry}/scanned/{repository}:{tag}-snyk-scanned`
 
 Example:
-- Source: `myregistry.azurecr.io/myapp:v1.0.0`
-- Destination: `myregistry.azurecr.io/scanned/myapp:v1.0.0-snyk-scanned`
+- Source: `publiccrlive.azurecr.io/myapp:v1.0.0`
+- Destination: `carisliveacr.azurecr.io/scanned/myapp:v1.0.0-snyk-scanned`
 
-## Security Benefits
+## Security and hygiene
+- Store the Teams webhook and any secrets in Azure DevOps variable groups or library as secret variables, not in the repo.
+- Limit permissions for the service principal used by `destinationRegistryServiceConnection` to only what it needs (AcrPush / reader on the source).
 
-- **Vulnerability Prevention**: Only images that pass Snyk security scans are promoted
-- **Traceability**: Clear naming convention indicates which images have been security validated
-- **Automated Enforcement**: No manual intervention required - security is built into the deployment pipeline
-- **Alert System**: Immediate notification when vulnerable images are detected
+## Running and testing
+- To validate changes, push a test image to the source registry and check the pipeline run logs:
+  - Verify `SetWebhookVars` sets `sourceRepository` / `sourceTag` / `sourceHost`
+  - Verify Snyk task runs and produces a pass/fail result
+  - Verify the push stage (if run) uses the correct `fullDestinationImageName`
 
-## Prerequisites
-
-1. Azure DevOps environment with required service connections
-2. Snyk account and organization setup
-3. Source and destination Azure Container Registries
-4. UkhoSnykScanTask extension installed in Azure DevOps
-5. Webhook connection configured between source ACR and Azure DevOps

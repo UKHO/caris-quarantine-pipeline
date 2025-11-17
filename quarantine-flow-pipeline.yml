@@ -1,4 +1,3 @@
-
 trigger: none
 pr: none
 
@@ -9,7 +8,9 @@ resources:
       filters:
         - path: target.mediaType
           value: "application/vnd.oci.image.index.v1+json"
-
+        - path: target.mediaType
+          value: "application/vnd.docker.distribution.manifest.list.v2+json"
+          
 variables:
   # Source registry variables - these are populated from the webhook trigger
   - name: sourceRegistryServiceConnection
@@ -23,9 +24,9 @@ variables:
   
   # Destination registry variables
   - name: destinationRegistryServiceConnection
-    value: 'publiccrlive-docker'
+    value: 'carisliveacr-docker'
   - name: destinationRegistry
-    value: 'publiccrlive.azurecr.io'
+    value: 'carisliveacr.azurecr.io'
   - name: destinationImageRepository
     value: 'scanned/$(sourceRepository)'
   
@@ -38,8 +39,14 @@ variables:
   # Build variables
   - name: scannedImageTag
     value: '$(sourceTag)-snyk-scanned'
+  - name: vulnerableImageTag
+    value: '$(sourceTag)-vulnerable'
   - name: fullDestinationImageName
     value: '$(destinationRegistry)/$(destinationImageRepository):$(scannedImageTag)'
+  - name: vulnerableImageRepository
+    value: 'vulnerable/$(sourceRepository)'
+  - name: fullVulnerableImageName
+    value: '$(destinationRegistry)/$(vulnerableImageRepository):$(vulnerableImageTag)'
 
   # Alert Variable
   - name: teamsWebhookEndpoint
@@ -75,8 +82,8 @@ stages:
         organization: '$(snykOrganization)'
         serviceConnectionEndpoint: '$(snykServiceConnection)'
         testType: container
-        monitorWhen: never
-        severityThreshold: high # change to low to test teams alert
+        monitorWhen: always
+        severityThreshold: high
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
 - stage: PushToPrivateRepo
@@ -133,17 +140,17 @@ stages:
         echo "Source repository: $(sourceRepository)"
       displayName: 'Pipeline Summary'
 
-- stage: AlertOnFail
-  displayName: 'Alert that vulnerable image present'
-  dependsOn: ScanContainer
-  condition: failed()
+- stage: AlertOnSuccess
+  displayName: 'Alert that scan completed successfully'
+  dependsOn: PushToPrivateRepo
+  condition: succeeded()
   jobs:
-  - job: SendTeamsMessage
-    displayName: 'Send Alert to Teams Channel'
+  - job: SendSuccessTeamsMessage
+    displayName: 'Send Success Alert to Teams Channel'
     pool: Mare Nectaris
     steps:
     - task: PowerShell@2
-      displayName: 'Send Alert'
+      displayName: 'Send Success Alert'
       inputs:
         targetType: 'inline'
         script: |
@@ -156,21 +163,20 @@ stages:
           }
           
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
+          $destinationImage = "$(fullDestinationImageName)"
           Write-Host "Source image: $sourceImage"
+          Write-Host "Destination image: $destinationImage"
           
-          $pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-
-          # Use a plain URL in the message so Teams auto-links it (works even if Power Automate doesn't render Markdown)
-          $messageWithUrl = "Container scanning failed for image: $sourceImage`nView pipeline run: $pipelineUrl"
-
-          $body = [ordered]@{
-            title = "Container Scanning Failed"
-            message = $messageWithUrl
-            pipelineUrl = $pipelineUrl
+          $body = @{
+            title = "Container Scan Completed Successfully"
+            message = "Container scanning passed and image has been pushed to private registry."
+            status = "success"
             sourceHost = "$(sourceHost)"
             sourceRepository = "$(sourceRepository)"
             sourceTag = "$(sourceTag)"
-          } | ConvertTo-Json -Depth 5
+            destinationImage = $destinationImage
+            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          } | ConvertTo-Json
           
           Write-Host "Sending request to Teams webhook..."
           Write-Host "Body: $body"
@@ -178,7 +184,101 @@ stages:
           try {
             $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
             Write-Host "Response: $response"
-            Write-Host "Alert sent successfully!"
+            Write-Host "Success alert sent successfully!"
+          } catch {
+            Write-Host "Error sending alert: $_"
+            Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+            Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
+          }
+
+- stage: AlertOnFail
+  displayName: 'Alert that vulnerable image present'
+  dependsOn: ScanContainer
+  condition: failed()
+  jobs:
+  - job: PushVulnerableImage
+    displayName: 'Push Vulnerable Image to vulnerable namespace'
+    pool: Mare Nectaris
+    steps:
+    # Login to source registry
+    - task: Docker@2
+      displayName: 'Login to Source Registry'
+      inputs:
+        containerRegistry: '$(sourceRegistryServiceConnection)'
+        command: 'login'
+
+    - task: PowerShell@2
+      displayName: 'Pull Published Image'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+
+    # Login to destination registry
+    - task: Docker@2
+      displayName: 'Login to Destination Registry'
+      inputs:
+        containerRegistry: '$(destinationRegistryServiceConnection)'
+        command: 'login'
+
+    # Tag the image as vulnerable
+    - task: Docker@2
+      displayName: 'Tag Image as Vulnerable'
+      inputs:
+        command: 'tag'
+        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullVulnerableImageName)'
+
+    # Push the vulnerable image
+    - task: Docker@2
+      displayName: 'Push Vulnerable Image'
+      inputs:
+        containerRegistry: '$(destinationRegistryServiceConnection)'
+        repository: '$(vulnerableImageRepository)'
+        command: 'push'
+        tags: '$(vulnerableImageTag)'
+
+  - job: SendFailureTeamsMessage
+    displayName: 'Send Failure Alert to Teams Channel'
+    dependsOn: PushVulnerableImage
+    condition: always()
+    pool: Mare Nectaris
+    steps:
+    - task: PowerShell@2
+      displayName: 'Send Failure Alert'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $webhookUrl = '$(teamsWebhookEndpoint)'
+          Write-Host "Webhook URL: $webhookUrl"
+          
+          if ($webhookUrl -eq '') {
+            Write-Host "Webhook URL is empty - skipping alert"
+            exit 0
+          }
+          
+          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
+          $vulnerableImage = "$(fullVulnerableImageName)"
+          Write-Host "Source image: $sourceImage"
+          Write-Host "Vulnerable image: $vulnerableImage"
+          
+          $body = @{
+            title = "Container Scan Failed"
+            message = "Container scanning failed due to vulnerabilities detected in image: $sourceImage"
+            status = "failure"
+            sourceHost = "$(sourceHost)"
+            sourceRepository = "$(sourceRepository)"
+            sourceTag = "$(sourceTag)"
+            vulnerableImage = $vulnerableImage
+            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          } | ConvertTo-Json
+          
+          Write-Host "Sending request to Teams webhook..."
+          Write-Host "Body: $body"
+          
+          try {
+            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
+            Write-Host "Response: $response"
+            Write-Host "Failure alert sent successfully!"
           } catch {
             Write-Host "Error sending alert: $_"
             Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
@@ -187,7 +287,7 @@ stages:
 
     # Summary step
     - script: |
-        echo "❌Container scanning and push completed unsuccessfully!"
+        echo "❌ Container scanning failed!"
         echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
         echo "Source repository: $(sourceRepository)"
       displayName: 'Pipeline Summary'
