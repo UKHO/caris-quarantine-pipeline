@@ -6,7 +6,8 @@ resources:
     - webhook: AcrWebhookTrigger
       connection: AcrWebhookConnection
       filters:
-      filters:
+        - path: target.mediaType
+          value: "application/vnd.docker.distribution.manifest.*"
         #- path: target.mediaType
         #  value: "application/vnd.oci.image.index.v1+json"
 
@@ -82,7 +83,7 @@ stages:
         serviceConnectionEndpoint: '$(snykServiceConnection)'
         testType: container
         monitorWhen: never
-        severityThreshold: low # change to low to test teams alert
+        severityThreshold: high # change to low to test teams alert
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
 - stage: PushToPrivateRepo
