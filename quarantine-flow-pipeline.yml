@@ -81,7 +81,7 @@ stages:
         serviceConnectionEndpoint: '$(snykServiceConnection)'
         testType: container
         monitorWhen: never
-        severityThreshold: critical # change to low to test teams alert
+        severityThreshold: high # change to low to test teams alert
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
 - stage: PushToPrivateRepo
