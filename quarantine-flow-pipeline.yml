@@ -37,8 +37,14 @@ variables:
   # Build variables
   - name: scannedImageTag
     value: '$(sourceTag)-snyk-scanned'
+  - name: vulnerableImageTag
+    value: '$(sourceTag)-vulnerable'
   - name: fullDestinationImageName
     value: '$(destinationRegistry)/$(destinationImageRepository):$(scannedImageTag)'
+  - name: vulnerableImageRepository
+    value: 'vulnerable/$(sourceRepository)'
+  - name: fullVulnerableImageName
+    value: '$(destinationRegistry)/$(vulnerableImageRepository):$(vulnerableImageTag)'
 
   # Alert Variable
   - name: teamsWebhookEndpoint
@@ -50,8 +56,7 @@ stages:
   jobs:
   - job: ContainerScan
     displayName: 'Scan Pushed Image'
-    pool:
-      vmImage: 'ubuntu-latest'
+    pool: Mare Nectaris
     steps:
     # Login to source registry
     - task: Docker@2
@@ -86,8 +91,7 @@ stages:
   jobs:
   - job: PullTagAndPush
     displayName: 'Pull, Tag and Push the image to the Private ACR'
-    pool:
-      vmImage: 'ubuntu-latest'
+    pool: Mare Nectaris
     steps:
     # Login to source registry
     - task: Docker@2
@@ -141,8 +145,7 @@ stages:
   jobs:
   - job: SendSuccessTeamsMessage
     displayName: 'Send Success Alert to Teams Channel'
-    pool:
-      vmImage: 'ubuntu-latest'
+    pool: Mare Nectaris
     steps:
     - task: PowerShell@2
       displayName: 'Send Success Alert'
@@ -191,10 +194,52 @@ stages:
   dependsOn: ScanContainer
   condition: failed()
   jobs:
+  - job: PushVulnerableImage
+    displayName: 'Push Vulnerable Image to vulnerable namespace'
+    pool: Mare Nectaris
+    steps:
+    # Login to source registry
+    - task: Docker@2
+      displayName: 'Login to Source Registry'
+      inputs:
+        containerRegistry: '$(sourceRegistryServiceConnection)'
+        command: 'login'
+
+    - task: PowerShell@2
+      displayName: 'Pull Published Image'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+
+    # Login to destination registry
+    - task: Docker@2
+      displayName: 'Login to Destination Registry'
+      inputs:
+        containerRegistry: '$(destinationRegistryServiceConnection)'
+        command: 'login'
+
+    # Tag the image as vulnerable
+    - task: Docker@2
+      displayName: 'Tag Image as Vulnerable'
+      inputs:
+        command: 'tag'
+        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullVulnerableImageName)'
+
+    # Push the vulnerable image
+    - task: Docker@2
+      displayName: 'Push Vulnerable Image'
+      inputs:
+        containerRegistry: '$(destinationRegistryServiceConnection)'
+        repository: '$(vulnerableImageRepository)'
+        command: 'push'
+        tags: '$(vulnerableImageTag)'
+
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'
-    pool:
-      vmImage: 'ubuntu-latest'
+    dependsOn: PushVulnerableImage
+    condition: always()
+    pool: Mare Nectaris
     steps:
     - task: PowerShell@2
       displayName: 'Send Failure Alert'
@@ -210,7 +255,9 @@ stages:
           }
           
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
+          $vulnerableImage = "$(fullVulnerableImageName)"
           Write-Host "Source image: $sourceImage"
+          Write-Host "Vulnerable image: $vulnerableImage"
           
           $body = @{
             title = "Container Scan Failed"
@@ -219,6 +266,7 @@ stages:
             sourceHost = "$(sourceHost)"
             sourceRepository = "$(sourceRepository)"
             sourceTag = "$(sourceTag)"
+            vulnerableImage = $vulnerableImage
             pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
           } | ConvertTo-Json
           
