@@ -9,7 +9,7 @@ resources:
         - path: target.mediaType
           value: "application/vnd.oci.image.index.v1+json"
         - path: target.mediaType
-          value: "vnd.docker.distribution.manifest.list.v2+json"
+          value: "application/vnd.docker.distribution.manifest.list.v2+json"
           
 variables:
   # Source registry variables - these are populated from the webhook trigger
