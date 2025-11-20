@@ -159,7 +159,7 @@ stages:
   jobs:
   - job: PushToPre
     displayName: 'Push to Pre ACR'
-    pool: Azure-UKHO-Engineering
+    pool: Mare Nectaris
     steps:
     # Login to source registry
     - task: Docker@2
@@ -308,7 +308,7 @@ stages:
 
   - job: PushPreVulnerableImage
     displayName: 'Push Vulnerable Image to Pre vulnerable namespace'
-    pool: Azure-UKHO-Engineering
+    pool: Mare Nectaris
     steps:
     # Login to source registry
     - task: Docker@2
