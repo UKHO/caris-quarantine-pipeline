@@ -15,6 +15,8 @@ variables:
   # Source registry variables - these are populated from the webhook trigger
   - name: sourceRegistryServiceConnection
     value: 'publiccrlive-docker'
+  - name: sourceRegistry
+    value: 'publiccrlive.azurecr.io'
   - name: sourceRepository
     value: ${{ parameters.AcrWebhookTrigger.target.repository }}
   - name: sourceTag
@@ -84,7 +86,7 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+          docker pull $(sourceRegistry)/$(sourceRepository):$(sourceTag)
 
     # Snyk scan using UkhoSnykScanTask
     - task: UkhoSnykScanTask@0
@@ -96,7 +98,7 @@ stages:
         testType: container
         monitorWhen: always
         severityThreshold: high
-        dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
+        dockerImageName: '$(sourceRegistry)/$(sourceRepository):$(sourceTag)'
 
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Private ACR'
@@ -119,7 +121,7 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+          docker pull $(sourceRegistry)/$(sourceRepository):$(sourceTag)
 
     # Login to destination registry
     - task: Docker@2
@@ -133,7 +135,7 @@ stages:
       displayName: 'Tag Image as Snyk Scanned'
       inputs:
         command: 'tag'
-        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullDestinationImageName)'
+        arguments: '$(sourceRegistry)/$(sourceRepository):$(sourceTag) $(fullDestinationImageName)'
 
     # Push the tagged image to destination registry
     - task: Docker@2
@@ -173,7 +175,7 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+          docker pull $(sourceRegistry)/$(sourceRepository):$(sourceTag)
 
     # Login to pre registry
     - task: Docker@2
@@ -187,7 +189,7 @@ stages:
       displayName: 'Tag Image for Pre'
       inputs:
         command: 'tag'
-        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullPreImageName)'
+        arguments: '$(sourceRegistry)/$(sourceRepository):$(sourceTag) $(fullPreImageName)'
 
     # Push the tagged image to pre registry
     - task: Docker@2
@@ -281,7 +283,7 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+          docker pull $(sourceRegistry)/$(sourceRepository):$(sourceTag)
 
     # Login to destination registry
     - task: Docker@2
@@ -295,7 +297,7 @@ stages:
       displayName: 'Tag Image as Vulnerable'
       inputs:
         command: 'tag'
-        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullVulnerableImageName)'
+        arguments: '$(sourceRegistry)/$(sourceRepository):$(sourceTag) $(fullVulnerableImageName)'
 
     # Push the vulnerable image
     - task: Docker@2
@@ -312,7 +314,7 @@ stages:
     steps:
     # Login to source registry
     - task: Docker@2
-      displayName: 'Login to Source Registry'
+      displayName: 'Login to Pre Registry'
       inputs:
         containerRegistry: '$(sourceRegistryServiceConnection)'
         command: 'login'
@@ -322,7 +324,7 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+          docker pull $(sourceRegistry)/$(sourceRepository):$(sourceTag)
 
     # Login to pre registry
     - task: Docker@2
@@ -336,7 +338,7 @@ stages:
       displayName: 'Tag Image as Vulnerable for Pre'
       inputs:
         command: 'tag'
-        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullPreVulnerableImageName)'
+        arguments: '$(sourceRegistry)/$(sourceRepository):$(sourceTag) $(fullPreVulnerableImageName)'
 
     # Push the vulnerable image to pre registry
     - task: Docker@2
