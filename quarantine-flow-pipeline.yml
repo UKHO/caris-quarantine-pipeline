@@ -56,7 +56,11 @@ variables:
   - name: fullVulnerableImageName
     value: '$(destinationRegistry)/$(vulnerableImageRepository):$(vulnerableImageTag)'
 
-  # Alert Variable
+  # Pre vulnerable variables
+  - name: preVulnerableImageRepository
+    value: 'vulnerable/$(sourceRepository)'
+  - name: fullPreVulnerableImageName
+    value: '$(preRegistry)/$(preVulnerableImageRepository):$(vulnerableImageTag)'
   - name: teamsWebhookEndpoint
     value: 'https://d217d034da18e574a33262c48b5477.aa.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/c67bbc4f253c448c8ec846386c3d9c2d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=1OVhyr6Nz66emPn1n4l7f0mdc2x0NITBZijEfnO4Krw'
 
@@ -302,9 +306,50 @@ stages:
         command: 'push'
         tags: '$(vulnerableImageTag)'
 
+  - job: PushPreVulnerableImage
+    displayName: 'Push Vulnerable Image to Pre vulnerable namespace'
+    pool: Azure-UKHO-Engineering
+    steps:
+    # Login to source registry
+    - task: Docker@2
+      displayName: 'Login to Source Registry'
+      inputs:
+        containerRegistry: '$(sourceRegistryServiceConnection)'
+        command: 'login'
+
+    - task: PowerShell@2
+      displayName: 'Pull Published Image'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+
+    # Login to pre registry
+    - task: Docker@2
+      displayName: 'Login to Pre Registry'
+      inputs:
+        containerRegistry: '$(preRegistryServiceConnection)'
+        command: 'login'
+
+    # Tag the image as vulnerable for pre
+    - task: Docker@2
+      displayName: 'Tag Image as Vulnerable for Pre'
+      inputs:
+        command: 'tag'
+        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullPreVulnerableImageName)'
+
+    # Push the vulnerable image to pre registry
+    - task: Docker@2
+      displayName: 'Push Vulnerable Image to Pre Registry'
+      inputs:
+        containerRegistry: '$(preRegistryServiceConnection)'
+        repository: '$(preVulnerableImageRepository)'
+        command: 'push'
+        tags: '$(vulnerableImageTag)'
+
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'
-    dependsOn: PushVulnerableImage
+    dependsOn: [PushVulnerableImage, PushPreVulnerableImage]
     condition: always()
     pool: Mare Nectaris
     steps:
@@ -323,17 +368,20 @@ stages:
           
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
           $vulnerableImage = "$(fullVulnerableImageName)"
+          $preVulnerableImage = "$(fullPreVulnerableImageName)"
           Write-Host "Source image: $sourceImage"
-          Write-Host "Vulnerable image: $vulnerableImage"
+          Write-Host "Live vulnerable image: $vulnerableImage"
+          Write-Host "Pre vulnerable image: $preVulnerableImage"
           
           $body = @{
             title = "Container Scan Failed"
-            message = "Container scanning failed due to vulnerabilities detected in image: $sourceImage"
+            message = "Container scanning failed due to vulnerabilities detected in image: $sourceImage. Vulnerable images pushed to live and pre registries."
             status = "failure"
             sourceHost = "$(sourceHost)"
             sourceRepository = "$(sourceRepository)"
             sourceTag = "$(sourceTag)"
             vulnerableImage = $vulnerableImage
+            preVulnerableImage = $preVulnerableImage
             pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
           } | ConvertTo-Json
           
