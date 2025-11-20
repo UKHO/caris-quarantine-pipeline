@@ -219,20 +219,18 @@ stages:
         containerRegistry: '$(destinationRegistryServiceConnection)'
         command: 'login'
 
-    # Tag the image as vulnerable (use inline script to avoid empty task_outputs warning)
-    - script: |
-        docker tag $(sourceHost)/$(sourceRepository):$(sourceTag) $(fullVulnerableImageName)
-        echo "Tagged: $(fullVulnerableImageName)"
-      displayName: 'Tag Image as Vulnerable'
-
-    # Push the vulnerable image
+    # Tag the image as vulnerable
     - task: Docker@2
-      displayName: 'Push Vulnerable Image'
+      displayName: 'Tag Image as Vulnerable'
       inputs:
-        containerRegistry: '$(destinationRegistryServiceConnection)'
-        repository: '$(vulnerableImageRepository)'
-        command: 'push'
-        tags: '$(vulnerableImageTag)'
+        command: 'tag'
+        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullVulnerableImageName)'
+
+    # Push the vulnerable image (push fully-qualified image name to ensure correct registry)
+    - script: |
+        docker push $(fullVulnerableImageName)
+        echo "Pushed: $(fullVulnerableImageName)"
+      displayName: 'Push Vulnerable Image'
 
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'
