@@ -290,12 +290,24 @@ stages:
         containerRegistry: '$(destinationRegistryServiceConnection)'
         command: 'login'
 
+    # Check DNS resolution for registry
+    - script: |
+        echo "Checking DNS resolution for $(destinationRegistry)..."
+        nslookup $(destinationRegistry) || echo "DNS lookup failed - registry may be private and agent cannot resolve"
+      displayName: 'Check DNS Resolution'
+
     # Tag the image as vulnerable
     - task: Docker@2
       displayName: 'Tag Image as Vulnerable'
       inputs:
         command: 'tag'
         arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullVulnerableImageName)'
+
+    # Confirm tag was created (to avoid warning about no output)
+    - script: |
+        echo "Tagged image as vulnerable: $(fullVulnerableImageName)"
+        docker images | grep "$(fullVulnerableImageName)" || echo "Tag not found in local images"
+      displayName: 'Confirm Vulnerable Tag'
 
     # Push the vulnerable image
     - task: Docker@2
@@ -331,12 +343,24 @@ stages:
         containerRegistry: '$(preRegistryServiceConnection)'
         command: 'login'
 
+    # Check DNS resolution for pre registry
+    - script: |
+        echo "Checking DNS resolution for $(preRegistry)..."
+        nslookup $(preRegistry) || echo "DNS lookup failed - pre registry may be private and agent cannot resolve"
+      displayName: 'Check Pre DNS Resolution'
+
     # Tag the image as vulnerable for pre
     - task: Docker@2
       displayName: 'Tag Image as Vulnerable for Pre'
       inputs:
         command: 'tag'
         arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullPreVulnerableImageName)'
+
+    # Confirm pre tag was created
+    - script: |
+        echo "Tagged image as vulnerable for pre: $(fullPreVulnerableImageName)"
+        docker images | grep "$(fullPreVulnerableImageName)" || echo "Pre tag not found in local images"
+      displayName: 'Confirm Pre Vulnerable Tag'
 
     # Push the vulnerable image to pre registry
     - task: Docker@2
