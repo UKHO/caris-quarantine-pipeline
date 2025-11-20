@@ -219,12 +219,11 @@ stages:
         containerRegistry: '$(destinationRegistryServiceConnection)'
         command: 'login'
 
-    # Tag the image as vulnerable
-    - task: Docker@2
+    # Tag the image as vulnerable (use inline script to avoid empty task_outputs warning)
+    - script: |
+        docker tag $(sourceHost)/$(sourceRepository):$(sourceTag) $(fullVulnerableImageName)
+        echo "Tagged: $(fullVulnerableImageName)"
       displayName: 'Tag Image as Vulnerable'
-      inputs:
-        command: 'tag'
-        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullVulnerableImageName)'
 
     # Push the vulnerable image
     - task: Docker@2
