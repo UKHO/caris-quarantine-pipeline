@@ -6,8 +6,10 @@ resources:
     - webhook: AcrWebhookTrigger
       connection: AcrWebhookConnection
       filters:
-        - path: action
-          value: "push"
+        - path: target.mediaType
+          value: "application/vnd.oci.image.index.v1+json"
+        - path: target.mediaType
+          value: "application/vnd.docker.distribution.manifest.list.v2+json"
           
 variables:
   # Source registry variables - these are populated from the webhook trigger
@@ -28,7 +30,15 @@ variables:
   - name: destinationImageRepository
     value: 'scanned/$(sourceRepository)'
   
-  # Snyk variables
+  # Pre registry variables
+  - name: preRegistryServiceConnection
+    value: 'carispreacr-docker'
+  - name: preRegistry
+    value: 'carispreacr.azurecr.io'
+  - name: preImageRepository
+    value: 'scanned/$(sourceRepository)'
+  - name: fullPreImageName
+    value: '$(preRegistry)/$(preImageRepository):$(scannedImageTag)'
   - name: snykServiceConnection
     value: 'SnykAuth'
   - name: snykOrganization
@@ -138,9 +148,63 @@ stages:
         echo "Source repository: $(sourceRepository)"
       displayName: 'Pipeline Summary'
 
+- stage: PushToPreACR
+  displayName: 'Push scanned image to Pre ACR'
+  dependsOn: PushToPrivateRepo
+  condition: succeeded()
+  jobs:
+  - job: PushToPre
+    displayName: 'Push to Pre ACR'
+    pool: Mare Nectaris
+    steps:
+    # Login to source registry
+    - task: Docker@2
+      displayName: 'Login to Source Registry'
+      inputs:
+        containerRegistry: '$(sourceRegistryServiceConnection)'
+        command: 'login'
+
+    - task: PowerShell@2
+      displayName: 'Pull Published Image'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+
+    # Login to pre registry
+    - task: Docker@2
+      displayName: 'Login to Pre Registry'
+      inputs:
+        containerRegistry: '$(preRegistryServiceConnection)'
+        command: 'login'
+
+    # Tag the image for pre
+    - task: Docker@2
+      displayName: 'Tag Image for Pre'
+      inputs:
+        command: 'tag'
+        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullPreImageName)'
+
+    # Push the tagged image to pre registry
+    - task: Docker@2
+      displayName: 'Push Scanned Image to Pre Registry'
+      inputs:
+        containerRegistry: '$(preRegistryServiceConnection)'
+        repository: '$(preImageRepository)'
+        command: 'push'
+        tags: '$(scannedImageTag)'
+
+    # Summary step
+    - script: |
+        echo "✅ Container pushed to Pre ACR successfully!"
+        echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
+        echo "Pre image: $(fullPreImageName)"
+        echo "Source repository: $(sourceRepository)"
+      displayName: 'Pre Push Summary'
+
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
-  dependsOn: PushToPrivateRepo
+  dependsOn: [PushToPrivateRepo, PushToPreACR]
   condition: succeeded()
   jobs:
   - job: SendSuccessTeamsMessage
@@ -162,17 +226,20 @@ stages:
           
           $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
           $destinationImage = "$(fullDestinationImageName)"
+          $preImage = "$(fullPreImageName)"
           Write-Host "Source image: $sourceImage"
-          Write-Host "Destination image: $destinationImage"
+          Write-Host "Live destination image: $destinationImage"
+          Write-Host "Pre destination image: $preImage"
           
           $body = @{
             title = "Container Scan Completed Successfully"
-            message = "Container scanning passed and image has been pushed to private registry."
+            message = "Container scanning passed and image has been pushed to both live and pre private registries."
             status = "success"
             sourceHost = "$(sourceHost)"
             sourceRepository = "$(sourceRepository)"
             sourceTag = "$(sourceTag)"
             destinationImage = $destinationImage
+            preImage = $preImage
             pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
           } | ConvertTo-Json
           
@@ -226,11 +293,14 @@ stages:
         command: 'tag'
         arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullVulnerableImageName)'
 
-    # Push the vulnerable image (push fully-qualified image name to ensure correct registry)
-    - script: |
-        docker push $(fullVulnerableImageName)
-        echo "Pushed: $(fullVulnerableImageName)"
+    # Push the vulnerable image
+    - task: Docker@2
       displayName: 'Push Vulnerable Image'
+      inputs:
+        containerRegistry: '$(destinationRegistryServiceConnection)'
+        repository: '$(vulnerableImageRepository)'
+        command: 'push'
+        tags: '$(vulnerableImageTag)'
 
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'
