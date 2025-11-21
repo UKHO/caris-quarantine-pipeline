@@ -162,8 +162,7 @@ stages:
   jobs:
   - job: PushToPre
     displayName: 'Push to Pre ACR'
-    pool:
-      vmImage: 'ubuntu-latest'
+    pool: Mare Nectaris
     steps:
     # Login to source registry
     - task: Docker@2
@@ -312,8 +311,7 @@ stages:
 
   - job: PushPreVulnerableImage
     displayName: 'Push Vulnerable Image to Pre vulnerable namespace'
-    pool:
-      vmImage: 'ubuntu-latest'
+    pool: Mare Nectaris
     steps:
     # Login to source registry
     - task: Docker@2
