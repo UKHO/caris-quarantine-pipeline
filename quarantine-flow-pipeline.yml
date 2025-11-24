@@ -222,50 +222,18 @@ stages:
     displayName: 'Send Success Alert to Teams Channel'
     pool: Mare Nectaris
     steps:
-    - task: PowerShell@2
-      displayName: 'Send Success Alert'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $webhookUrl = '$(teamsWebhookEndpoint)'
-          Write-Host "Webhook URL: $webhookUrl"
-          
-          if ($webhookUrl -eq '') {
-            Write-Host "Webhook URL is empty - skipping alert"
-            exit 0
-          }
-          
-          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-          $destinationImage = "$(fullDestinationImageName)"
-          $preImage = "$(fullPreImageName)"
-          Write-Host "Source image: $sourceImage"
-          Write-Host "Live destination image: $destinationImage"
-          Write-Host "Pre destination image: $preImage"
-          
-          $body = @{
-            title = "Container Scan Completed Successfully"
-            message = "Container scanning passed and image has been pushed to live and pre private registries."
-            status = "success"
-            sourceHost = "$(sourceHost)"
-            sourceRepository = "$(sourceRepository)"
-            sourceTag = "$(sourceTag)"
-            destinationImage = $destinationImage
-            preImage = $preImage
-            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-          } | ConvertTo-Json
-          
-          Write-Host "Sending request to Teams webhook..."
-          Write-Host "Body: $body"
-          
-          try {
-            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
-            Write-Host "Response: $response"
-            Write-Host "Success alert sent successfully!"
-          } catch {
-            Write-Host "Error sending alert: $_"
-            Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
-            Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
-          }
+    - template: templates/send-teams-alert.yml
+      parameters:
+        webhookUrl: '$(teamsWebhookEndpoint)'
+        title: 'Container Scan Completed Successfully'
+        message: 'Container scanning passed and image has been pushed to live and pre private registries.'
+        status: 'success'
+        sourceHost: '$(sourceHost)'
+        sourceRepository: '$(sourceRepository)'
+        sourceTag: '$(sourceTag)'
+        destinationImage: '$(fullDestinationImageName)'
+        preImage: '$(fullPreImageName)'
+        pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
 
 - stage: AlertOnFail
   displayName: 'Alert that vulnerable image present'
@@ -360,50 +328,18 @@ stages:
     condition: always()
     pool: Mare Nectaris
     steps:
-    - task: PowerShell@2
-      displayName: 'Send Failure Alert'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $webhookUrl = '$(teamsWebhookEndpoint)'
-          Write-Host "Webhook URL: $webhookUrl"
-          
-          if ($webhookUrl -eq '') {
-            Write-Host "Webhook URL is empty - skipping alert"
-            exit 0
-          }
-          
-          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-          $vulnerableImage = "$(fullVulnerableImageName)"
-          $preVulnerableImage = "$(fullPreVulnerableImageName)"
-          Write-Host "Source image: $sourceImage"
-          Write-Host "Live vulnerable image: $vulnerableImage"
-          Write-Host "Pre vulnerable image: $preVulnerableImage"
-          
-          $body = @{
-            title = "Container Scan Failed"
-            message = "Container scanning failed due to vulnerabilities detected in image: $sourceImage. Vulnerable images pushed to live and pre registries."
-            status = "failure"
-            sourceHost = "$(sourceHost)"
-            sourceRepository = "$(sourceRepository)"
-            sourceTag = "$(sourceTag)"
-            vulnerableImage = $vulnerableImage
-            preVulnerableImage = $preVulnerableImage
-            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-          } | ConvertTo-Json
-          
-          Write-Host "Sending request to Teams webhook..."
-          Write-Host "Body: $body"
-          
-          try {
-            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
-            Write-Host "Response: $response"
-            Write-Host "Failure alert sent successfully!"
-          } catch {
-            Write-Host "Error sending alert: $_"
-            Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
-            Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
-          }
+    - template: templates/send-teams-alert.yml
+      parameters:
+        webhookUrl: '$(teamsWebhookEndpoint)'
+        title: 'Container Scan Failed'
+        message: 'Container scanning failed due to vulnerabilities detected in image: $(sourceHost)/$(sourceRepository):$(sourceTag). Vulnerable images pushed to live and pre registries.'
+        status: 'failure'
+        sourceHost: '$(sourceHost)'
+        sourceRepository: '$(sourceRepository)'
+        sourceTag: '$(sourceTag)'
+        vulnerableImage: '$(fullVulnerableImageName)'
+        preVulnerableImage: '$(fullPreVulnerableImageName)'
+        pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
 
     # Summary step
     - script: |
