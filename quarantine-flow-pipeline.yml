@@ -225,18 +225,24 @@ stages:
     displayName: 'Send Success Alert to Teams Channel'
     pool: Mare Nectaris
     steps:
-    - template: templates/send-teams-alert.yml
-      parameters:
-        webhookUrl: '$(teamsWebhookEndpoint)'
-        title: 'Container Scan Completed Successfully'
-        message: 'Container scanning passed and image has been pushed to live and pre private registries.'
-        status: 'success'
-        sourceHost: '$(sourceHost)'
-        sourceRepository: '$(sourceRepository)'
-        sourceTag: '$(sourceTag)'
-        destinationImage: '$(fullDestinationImageName)'
-        preImage: '$(fullPreImageName)'
-        pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
+    - task: PowerShell@2
+      displayName: 'Send Teams Alert'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $body = @{
+            title = "Container Scan Completed Successfully"
+            message = "Container scanning passed and image has been pushed to live and pre private registries."
+            status = "success"
+            sourceHost = "$(sourceHost)"
+            sourceRepository = "$(sourceRepository)"
+            sourceTag = "$(sourceTag)"
+            destinationImage = "$(fullDestinationImageName)"
+            preImage = "$(fullPreImageName)"
+            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          } | ConvertTo-Json
+          
+          Invoke-RestMethod -Uri "$(teamsWebhookEndpoint)" -Method Post -Body $body -ContentType 'application/json'
 
 - stage: AlertOnFail
   displayName: 'Alert that vulnerable image present'
@@ -331,18 +337,24 @@ stages:
     condition: always()
     pool: Mare Nectaris
     steps:
-    - template: templates/send-teams-alert.yml
-      parameters:
-        webhookUrl: '$(teamsWebhookEndpoint)'
-        title: 'Container Scan Failed'
-        message: 'Container scanning failed due to vulnerabilities detected in image: $(sourceHost)/$(sourceRepository):$(sourceTag). Vulnerable images pushed to live and pre registries.'
-        status: 'failure'
-        sourceHost: '$(sourceHost)'
-        sourceRepository: '$(sourceRepository)'
-        sourceTag: '$(sourceTag)'
-        vulnerableImage: '$(fullVulnerableImageName)'
-        preVulnerableImage: '$(fullPreVulnerableImageName)'
-        pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
+    - task: PowerShell@2
+      displayName: 'Send Teams Alert'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $body = @{
+            title = "Container Scan Failed"
+            message = "Container scanning failed due to vulnerabilities detected in image: $(sourceHost)/$(sourceRepository):$(sourceTag). Vulnerable images pushed to live and pre registries."
+            status = "failure"
+            sourceHost = "$(sourceHost)"
+            sourceRepository = "$(sourceRepository)"
+            sourceTag = "$(sourceTag)"
+            vulnerableImage = "$(fullVulnerableImageName)"
+            preVulnerableImage = "$(fullPreVulnerableImageName)"
+            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          } | ConvertTo-Json
+          
+          Invoke-RestMethod -Uri "$(teamsWebhookEndpoint)" -Method Post -Body $body -ContentType 'application/json'
 
     # Summary step
     - script: |
