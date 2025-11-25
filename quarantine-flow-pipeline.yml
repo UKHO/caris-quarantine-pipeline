@@ -9,8 +9,6 @@ resources:
     - webhook: AcrWebhookTrigger
       connection: AcrWebhookConnection
       filters:
-        - path: action
-          value: push
         - path: target.mediaType
           value: "application/vnd.oci.image.index.v1+json"
         - path: target.mediaType
