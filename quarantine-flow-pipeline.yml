@@ -1,6 +1,3 @@
-##quarantine backup
-
-
 trigger: none
 pr: none
 
@@ -9,15 +6,11 @@ resources:
     - webhook: AcrWebhookTrigger
       connection: AcrWebhookConnection
       filters:
-        - path: action
-          value: push
-        #- path: target.mediaType
-        #  value: "application/vnd.oci.image.index.v1+json"
+        - path: target.mediaType
+          value: "application/vnd.oci.image.index.v1+json"
         #- path: target.mediaType
         #  value: "application/vnd.docker.distribution.manifest.list.v2+json"
-#
-        
-          
+
 variables:
   # Source registry variables - these are populated from the webhook trigger
   - name: sourceRegistryServiceConnection
