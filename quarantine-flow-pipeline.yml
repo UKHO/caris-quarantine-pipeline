@@ -9,14 +9,7 @@ resources:
         - path: action
           value: push
         - path: target.mediaType
-          value: "application/vnd.docker.distribution.manifest.list.v2+json"
-    - webhook: AcrWebhookTriggerOCI
-      connection: AcrWebhookConnection
-      filters:
-        - path: action
-          value: push
-        - path: target.mediaType
-          value: "application/vnd.oci.image.index.v1+json"
+          value: "application/vnd.oci.image.index.v1+json|application/vnd.docker.distribution.manifest.list.v2+json"
 
         
           
@@ -25,11 +18,11 @@ variables:
   - name: sourceRegistryServiceConnection
     value: 'publiccrlive-docker'
   - name: sourceRepository
-    value: ${{ coalesce(parameters.AcrWebhookTrigger.target.repository, parameters.AcrWebhookTriggerOCI.target.repository) }}
+    value: ${{ parameters.AcrWebhookTrigger.target.repository }}
   - name: sourceTag
-    value: ${{ coalesce(parameters.AcrWebhookTrigger.target.tag, parameters.AcrWebhookTriggerOCI.target.tag) }}
+    value: ${{ parameters.AcrWebhookTrigger.target.tag }}
   - name: sourceHost
-    value: ${{ coalesce(parameters.AcrWebhookTrigger.request.host, parameters.AcrWebhookTriggerOCI.request.host) }}
+    value: ${{ parameters.AcrWebhookTrigger.request.host }}
   
   # Destination registry variables
   - name: destinationRegistryServiceConnection
