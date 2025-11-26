@@ -1,0 +1,25 @@
+trigger: none
+pr: none
+
+resources:
+  webhooks:
+    - webhook: AcrWebhookTrigger
+      connection: AcrWebhookConnection
+      filters:
+        - path: target.mediaType
+          value: "application/vnd.oci.image.index.v1+json"
+
+extends:
+  template: templates/container-scan-template.yml
+  parameters:
+    sourceRegistryServiceConnection: 'publiccrlive-docker'
+    destinationRegistryServiceConnection: 'carisliveacr-docker'
+    preRegistryServiceConnection: 'carispreacr-docker'
+    destinationRegistry: 'carisliveacr.azurecr.io'
+    preRegistry: 'carispreacr.azurecr.io'
+    snykServiceConnection: 'SnykAuth'
+    snykOrganization: 'caris-cloud'
+    teamsWebhookEndpoint: 'https://d217d034da18e574a33262c48b5477.aa.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/c67bbc4f253c448c8ec846386c3d9c2d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=1OVhyr6Nz66emPn1n4l7f0mdc2x0NITBZijEfnO4Krw'
+    sourceRepository: ${{ parameters.AcrWebhookTrigger.target.repository }}
+    sourceTag: ${{ parameters.AcrWebhookTrigger.target.tag }}
+    sourceHost: ${{ parameters.AcrWebhookTrigger.request.host }}
