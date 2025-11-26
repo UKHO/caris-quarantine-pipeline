@@ -10,7 +10,7 @@ resources:
           value: "application/vnd.oci.image.index.v1+json"
         - path: target.mediaType
           value: "application/vnd.docker.distribution.manifest.list.v2+json"
-          
+
 variables:
   # Source registry variables - these are populated from the webhook trigger
   - name: sourceRegistryServiceConnection
@@ -30,6 +30,16 @@ variables:
   - name: destinationImageRepository
     value: 'scanned/$(sourceRepository)'
   
+  # Pre registry variables (mirror live ACR)
+  - name: preRegistryServiceConnection
+    value: 'carispreacr-docker'
+  - name: preRegistry
+    value: 'carispreacr.azurecr.io'
+  - name: preImageRepository
+    value: 'scanned/$(sourceRepository)'
+  - name: fullPreImageName
+    value: '$(preRegistry)/$(preImageRepository):$(scannedImageTag)'
+  
   # Snyk variables
   - name: snykServiceConnection
     value: 'SnykAuth'
@@ -47,6 +57,11 @@ variables:
     value: 'vulnerable/$(sourceRepository)'
   - name: fullVulnerableImageName
     value: '$(destinationRegistry)/$(vulnerableImageRepository):$(vulnerableImageTag)'
+  # Pre vulnerable variables (mirror live vulnerable behavior)
+  - name: preVulnerableImageRepository
+    value: 'vulnerable/$(sourceRepository)'
+  - name: fullPreVulnerableImageName
+    value: '$(preRegistry)/$(preVulnerableImageRepository):$(vulnerableImageTag)'
 
   # Alert Variable
   - name: teamsWebhookEndpoint
@@ -86,9 +101,63 @@ stages:
         severityThreshold: high
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
+- stage: PushToPreACR
+  displayName: 'Push scanned image to Pre ACR'
+  dependsOn: ScanContainer
+  condition: succeeded()
+  jobs:
+  - job: PushToPre
+    displayName: 'Push to Pre ACR'
+    pool: Mare Nectaris
+    steps:
+    # Login to source registry
+    - task: Docker@2
+      displayName: 'Login to Source Registry'
+      inputs:
+        containerRegistry: '$(sourceRegistryServiceConnection)'
+        command: 'login'
+
+    - task: PowerShell@2
+      displayName: 'Pull Published Image'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+
+    # Login to pre registry
+    - task: Docker@2
+      displayName: 'Login to Pre Registry'
+      inputs:
+        containerRegistry: '$(preRegistryServiceConnection)'
+        command: 'login'
+
+    # Tag the image for pre
+    - task: Docker@2
+      displayName: 'Tag Image for Pre'
+      inputs:
+        command: 'tag'
+        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullPreImageName)'
+
+    # Push the tagged image to pre registry
+    - task: Docker@2
+      displayName: 'Push Scanned Image to Pre Registry'
+      inputs:
+        containerRegistry: '$(preRegistryServiceConnection)'
+        repository: '$(preImageRepository)'
+        command: 'push'
+        tags: '$(scannedImageTag)'
+
+    # Summary step
+    - script: |
+        echo "✅ Container pushed to Pre ACR successfully!"
+        echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
+        echo "Pre image: $(fullPreImageName)"
+        echo "Source repository: $(sourceRepository)"
+      displayName: 'Pre Push Summary'
+
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Private ACR'
-  dependsOn: ScanContainer
+  dependsOn: PushToPreACR
   condition: succeeded()
   jobs:
   - job: PullTagAndPush
@@ -142,7 +211,7 @@ stages:
 
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
-  dependsOn: PushToPrivateRepo
+  dependsOn: [PushToPreACR, PushToPrivateRepo]
   condition: succeeded()
   jobs:
   - job: SendSuccessTeamsMessage
@@ -150,54 +219,73 @@ stages:
     pool: Mare Nectaris
     steps:
     - task: PowerShell@2
-      displayName: 'Send Success Alert'
+      displayName: 'Send Teams Alert'
       inputs:
         targetType: 'inline'
         script: |
-          $webhookUrl = '$(teamsWebhookEndpoint)'
-          Write-Host "Webhook URL: $webhookUrl"
-          
-          if ($webhookUrl -eq '') {
-            Write-Host "Webhook URL is empty - skipping alert"
-            exit 0
-          }
-          
-          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-          $destinationImage = "$(fullDestinationImageName)"
-          Write-Host "Source image: $sourceImage"
-          Write-Host "Destination image: $destinationImage"
-          
           $body = @{
             title = "Container Scan Completed Successfully"
-            message = "Container scanning passed and image has been pushed to private registry."
+            message = "Container scanning passed and image has been pushed to live and pre private registries."
             status = "success"
             sourceHost = "$(sourceHost)"
             sourceRepository = "$(sourceRepository)"
             sourceTag = "$(sourceTag)"
-            destinationImage = $destinationImage
+            destinationImage = "$(fullDestinationImageName)"
+            preImage = "$(fullPreImageName)"
             pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
           } | ConvertTo-Json
           
-          Write-Host "Sending request to Teams webhook..."
-          Write-Host "Body: $body"
-          
-          try {
-            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
-            Write-Host "Response: $response"
-            Write-Host "Success alert sent successfully!"
-          } catch {
-            Write-Host "Error sending alert: $_"
-            Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
-            Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
-          }
+          Invoke-RestMethod -Uri "$(teamsWebhookEndpoint)" -Method Post -Body $body -ContentType 'application/json'
 
 - stage: AlertOnFail
   displayName: 'Alert that vulnerable image present'
   dependsOn: ScanContainer
   condition: failed()
   jobs:
+  - job: PushPreVulnerableImage
+    displayName: 'Push Vulnerable Image to Pre vulnerable namespace'
+    pool: Mare Nectaris
+    steps:
+    # Login to source registry
+    - task: Docker@2
+      displayName: 'Login to Source Registry'
+      inputs:
+        containerRegistry: '$(sourceRegistryServiceConnection)'
+        command: 'login'
+
+    - task: PowerShell@2
+      displayName: 'Pull Published Image'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+
+    # Login to pre registry
+    - task: Docker@2
+      displayName: 'Login to Pre Registry'
+      inputs:
+        containerRegistry: '$(preRegistryServiceConnection)'
+        command: 'login'
+
+    # Tag the image as vulnerable for pre
+    - task: Docker@2
+      displayName: 'Tag Image as Vulnerable for Pre'
+      inputs:
+        command: 'tag'
+        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullPreVulnerableImageName)'
+
+    # Push the vulnerable image to pre registry
+    - task: Docker@2
+      displayName: 'Push Vulnerable Image to Pre Registry'
+      inputs:
+        containerRegistry: '$(preRegistryServiceConnection)'
+        repository: '$(preVulnerableImageRepository)'
+        command: 'push'
+        tags: '$(vulnerableImageTag)'
+
   - job: PushVulnerableImage
     displayName: 'Push Vulnerable Image to vulnerable namespace'
+    dependsOn: PushPreVulnerableImage
     pool: Mare Nectaris
     steps:
     # Login to source registry
@@ -239,51 +327,28 @@ stages:
 
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'
-    dependsOn: PushVulnerableImage
+    dependsOn: [PushPreVulnerableImage, PushVulnerableImage]
     condition: always()
     pool: Mare Nectaris
     steps:
     - task: PowerShell@2
-      displayName: 'Send Failure Alert'
+      displayName: 'Send Teams Alert'
       inputs:
         targetType: 'inline'
         script: |
-          $webhookUrl = '$(teamsWebhookEndpoint)'
-          Write-Host "Webhook URL: $webhookUrl"
-          
-          if ($webhookUrl -eq '') {
-            Write-Host "Webhook URL is empty - skipping alert"
-            exit 0
-          }
-          
-          $sourceImage = "$(sourceHost)/$(sourceRepository):$(sourceTag)"
-          $vulnerableImage = "$(fullVulnerableImageName)"
-          Write-Host "Source image: $sourceImage"
-          Write-Host "Vulnerable image: $vulnerableImage"
-          
           $body = @{
             title = "Container Scan Failed"
-            message = "Container scanning failed due to vulnerabilities detected in image: $sourceImage"
+            message = "Container scanning failed due to vulnerabilities detected in image: $(sourceHost)/$(sourceRepository):$(sourceTag). Vulnerable images pushed to live and pre registries."
             status = "failure"
             sourceHost = "$(sourceHost)"
             sourceRepository = "$(sourceRepository)"
             sourceTag = "$(sourceTag)"
-            vulnerableImage = $vulnerableImage
+            vulnerableImage = "$(fullVulnerableImageName)"
+            preVulnerableImage = "$(fullPreVulnerableImageName)"
             pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
           } | ConvertTo-Json
           
-          Write-Host "Sending request to Teams webhook..."
-          Write-Host "Body: $body"
-          
-          try {
-            $response = Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $body -ContentType 'application/json'
-            Write-Host "Response: $response"
-            Write-Host "Failure alert sent successfully!"
-          } catch {
-            Write-Host "Error sending alert: $_"
-            Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
-            Write-Host "Status Description: $($_.Exception.Response.StatusDescription)"
-          }
+          Invoke-RestMethod -Uri "$(teamsWebhookEndpoint)" -Method Post -Body $body -ContentType 'application/json'
 
     # Summary step
     - script: |
