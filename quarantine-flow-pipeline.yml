@@ -1,3 +1,14 @@
+# DEPRECATED: This pipeline has been replaced by:
+# - quarantine-flow-pipeline-docker.yml (for Docker manifest lists)
+# - quarantine-flow-pipeline-oci.yml (for OCI image indices)
+# Both use templates/container-scan-template.yml for shared logic
+
+trigger: none
+pr: none
+
+# This pipeline is kept for reference only and should not be run
+stages: []
+
 #trigger: none
 #pr: none
 #
