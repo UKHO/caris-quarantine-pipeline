@@ -101,63 +101,9 @@ stages:
         severityThreshold: high
         dockerImageName: '$(sourceHost)/$(sourceRepository):$(sourceTag)'
 
-- stage: PushToPrivateRepo
-  displayName: 'Push passed image to Private ACR'
-  dependsOn: ScanContainer
-  condition: succeeded()
-  jobs:
-  - job: PullTagAndPush
-    displayName: 'Pull, Tag and Push the image to the Private ACR'
-    pool: Mare Nectaris
-    steps:
-    # Login to source registry
-    - task: Docker@2
-      displayName: 'Login to Source Registry'
-      inputs:
-        containerRegistry: '$(sourceRegistryServiceConnection)'
-        command: 'login'
-
-    - task: PowerShell@2
-      displayName: 'Pull Published Image'
-      inputs:
-        targetType: 'inline'
-        script: |
-          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
-
-    # Login to destination registry
-    - task: Docker@2
-      displayName: 'Login to Destination Registry'
-      inputs:
-        containerRegistry: '$(destinationRegistryServiceConnection)'
-        command: 'login'
-
-    # Tag the image with snyk-scanned suffix
-    - task: Docker@2
-      displayName: 'Tag Image as Snyk Scanned'
-      inputs:
-        command: 'tag'
-        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullDestinationImageName)'
-
-    # Push the tagged image to destination registry
-    - task: Docker@2
-      displayName: 'Push Scanned Image to Destination Registry'
-      inputs:
-        containerRegistry: '$(destinationRegistryServiceConnection)'
-        repository: '$(destinationImageRepository)'
-        command: 'push'
-        tags: '$(scannedImageTag)'
-
-    # Summary step
-    - script: |
-        echo "✅ Container scanning and push completed successfully!"
-        echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
-        echo "Destination image: $(fullDestinationImageName)"
-        echo "Source repository: $(sourceRepository)"
-      displayName: 'Pipeline Summary'
-
 - stage: PushToPreACR
   displayName: 'Push scanned image to Pre ACR'
-  dependsOn: PushToPrivateRepo
+  dependsOn: ScanContainer
   condition: succeeded()
   jobs:
   - job: PushToPre
@@ -209,9 +155,63 @@ stages:
         echo "Source repository: $(sourceRepository)"
       displayName: 'Pre Push Summary'
 
+- stage: PushToPrivateRepo
+  displayName: 'Push passed image to Private ACR'
+  dependsOn: PushToPreACR
+  condition: succeeded()
+  jobs:
+  - job: PullTagAndPush
+    displayName: 'Pull, Tag and Push the image to the Private ACR'
+    pool: Mare Nectaris
+    steps:
+    # Login to source registry
+    - task: Docker@2
+      displayName: 'Login to Source Registry'
+      inputs:
+        containerRegistry: '$(sourceRegistryServiceConnection)'
+        command: 'login'
+
+    - task: PowerShell@2
+      displayName: 'Pull Published Image'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker pull $(sourceHost)/$(sourceRepository):$(sourceTag)
+
+    # Login to destination registry
+    - task: Docker@2
+      displayName: 'Login to Destination Registry'
+      inputs:
+        containerRegistry: '$(destinationRegistryServiceConnection)'
+        command: 'login'
+
+    # Tag the image with snyk-scanned suffix
+    - task: Docker@2
+      displayName: 'Tag Image as Snyk Scanned'
+      inputs:
+        command: 'tag'
+        arguments: '$(sourceHost)/$(sourceRepository):$(sourceTag) $(fullDestinationImageName)'
+
+    # Push the tagged image to destination registry
+    - task: Docker@2
+      displayName: 'Push Scanned Image to Destination Registry'
+      inputs:
+        containerRegistry: '$(destinationRegistryServiceConnection)'
+        repository: '$(destinationImageRepository)'
+        command: 'push'
+        tags: '$(scannedImageTag)'
+
+    # Summary step
+    - script: |
+        echo "✅ Container scanning and push completed successfully!"
+        echo "Source image: $(sourceHost)/$(sourceRepository):$(sourceTag)"
+        echo "Destination image: $(fullDestinationImageName)"
+        echo "Source repository: $(sourceRepository)"
+      displayName: 'Pipeline Summary'
+
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
-  dependsOn: [PushToPrivateRepo, PushToPreACR]
+  dependsOn: [PushToPreACR, PushToPrivateRepo]
   condition: succeeded()
   jobs:
   - job: SendSuccessTeamsMessage
