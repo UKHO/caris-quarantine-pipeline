@@ -1,6 +1,6 @@
 resources:
   webhooks:
-    - webhook: AcrWebhookTrigger
+    - webhook: AcrWebhookTriggerDocker
       connection: AcrWebhookConnection
       filters:
         - path: target.mediaType
@@ -23,12 +23,6 @@ variables:
     value: 'caris-cloud'
   - name: teamsWebhookEndpoint
     value: 'https://d217d034da18e574a33262c48b5477.aa.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/c67bbc4f253c448c8ec846386c3d9c2d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=1OVhyr6Nz66emPn1n4l7f0mdc2x0NITBZijEfnO4Krw'
-  - name: sourceRepository
-    value: ${{ parameters.AcrWebhookTrigger.target.repository }}
-  - name: sourceTag
-    value: ${{ parameters.AcrWebhookTrigger.target.tag }}
-  - name: sourceHost
-    value: ${{ parameters.AcrWebhookTrigger.request.host }}
 
 stages:
 - template: templates/container-scan-template.yml
@@ -41,6 +35,6 @@ stages:
     snykServiceConnection: '$(snykServiceConnection)'
     snykOrganization: '$(snykOrganization)'
     teamsWebhookEndpoint: '$(teamsWebhookEndpoint)'
-    sourceRepository: '$(sourceRepository)'
-    sourceTag: '$(sourceTag)'
-    sourceHost: '$(sourceHost)'
+    sourceRepository: ${{ parameters.AcrWebhookTriggerDocker.target.repository }}
+    sourceTag: ${{ parameters.AcrWebhookTriggerDocker.target.tag }}
+    sourceHost: ${{ parameters.AcrWebhookTriggerDocker.request.host }}
