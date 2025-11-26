@@ -9,8 +9,8 @@ resources:
         - path: target.mediaType
           value: "application/vnd.docker.distribution.manifest.list.v2+json"
 
-extends:
-  template: templates/container-scan-template.yml
+stages:
+- template: templates/container-scan-template.yml
   parameters:
     sourceRegistryServiceConnection: 'publiccrlive-docker'
     destinationRegistryServiceConnection: 'carisliveacr-docker'
