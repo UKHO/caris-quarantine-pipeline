@@ -4,7 +4,7 @@ pr: none
 resources:
   webhooks:
     - webhook: AcrWebhookTriggerDocker
-      connection: AcrWebhookConnection
+      connection: AcrWebhookConnection1
       filters:
         - path: target.mediaType
           value: "application/vnd.docker.distribution.manifest.list.v2+json"
