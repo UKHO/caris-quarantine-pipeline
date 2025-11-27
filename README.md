@@ -128,7 +128,6 @@ Example:
 - Live: `carisliveacr.azurecr.io/vulnerable/myapp:v1.0.0-vulnerable`
 
 ## Security and hygiene
-- Store the Teams webhook and any secrets in Azure DevOps variable groups or library as secret variables, not in the repo.
 - Limit permissions for the service principal used by `destinationRegistryServiceConnection` to only what it needs (AcrPush / reader on the source).
 
 ## Running and testing
