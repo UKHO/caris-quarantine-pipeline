@@ -40,7 +40,6 @@ stages:
       displayName: 'Pull Published Image'
       inputs:
         targetType: 'inline'
-        pwsh: false
         script: |
           docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
 
@@ -81,7 +80,6 @@ stages:
       displayName: 'Pull Published Image'
       inputs:
         targetType: 'inline'
-        pwsh: false
         script: |
           docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
 
@@ -137,7 +135,6 @@ stages:
       displayName: 'Pull Published Image'
       inputs:
         targetType: 'inline'
-        pwsh: false
         script: |
           docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
 
@@ -184,7 +181,6 @@ stages:
       displayName: 'Send Teams Alert'
       inputs:
         targetType: 'inline'
-        pwsh: false
         script: |
           $body = @{
             title = "Container Scan Completed Successfully"
@@ -226,7 +222,6 @@ stages:
       displayName: 'Pull Published Image'
       inputs:
         targetType: 'inline'
-        pwsh: false
         script: |
           docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
 
@@ -272,7 +267,6 @@ stages:
       displayName: 'Pull Published Image'
       inputs:
         targetType: 'inline'
-        pwsh: false
         script: |
           docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
 
@@ -310,7 +304,6 @@ stages:
       displayName: 'Send Teams Alert'
       inputs:
         targetType: 'inline'
-        pwsh: false
         script: |
           $body = @{
             title = "Container Scan Failed"
