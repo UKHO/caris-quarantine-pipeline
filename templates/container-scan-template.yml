@@ -30,6 +30,35 @@ stages:
     displayName: 'Scan Pushed Image'
     pool: Mare Nectaris
     steps:
+    - task: PowerShell@2
+      displayName: 'Check Agent Outbound IP'
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Get outbound IP using multiple services for reliability
+          Write-Host "Checking outbound IP addresses..."
+          
+          try {
+            $ip1 = Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 10
+            Write-Host "ipify.org reports: $($ip1.ip)"
+          } catch {
+            Write-Host "ipify.org failed: $_"
+          }
+          
+          try {
+            $ip2 = Invoke-RestMethod -Uri 'https://ifconfig.me/ip' -TimeoutSec 10
+            Write-Host "ifconfig.me reports: $ip2"
+          } catch {
+            Write-Host "ifconfig.me failed: $_"
+          }
+          
+          try {
+            $ip3 = Invoke-RestMethod -Uri 'https://checkip.amazonaws.com' -TimeoutSec 10
+            Write-Host "AWS checkip reports: $($ip3.Trim())"
+          } catch {
+            Write-Host "AWS checkip failed: $_"
+          }
+
     - task: Docker@2
       displayName: 'Login to Source Registry'
       inputs:
