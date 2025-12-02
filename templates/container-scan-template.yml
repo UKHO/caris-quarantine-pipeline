@@ -137,6 +137,7 @@ stages:
       displayName: 'Pull Published Image'
       inputs:
         targetType: 'inline'
+        pwsh: false
         script: |
           docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
 
