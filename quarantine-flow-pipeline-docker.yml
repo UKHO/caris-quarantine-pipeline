@@ -10,6 +10,7 @@ resources:
           value: "application/vnd.docker.distribution.manifest.list.v2+json"
 
 variables:
+  - group: caris-quarantine
   - name: sourceRegistryServiceConnection
     value: 'publiccrlive-docker'
   - name: destinationRegistryServiceConnection
@@ -24,8 +25,6 @@ variables:
     value: 'SnykAuth'
   - name: snykOrganization
     value: 'caris-cloud'
-  - name: teamsWebhookEndpoint
-    value: 'https://d217d034da18e574a33262c48b5477.aa.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/c67bbc4f253c448c8ec846386c3d9c2d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=1OVhyr6Nz66emPn1n4l7f0mdc2x0NITBZijEfnO4Krw'
 
 stages:
 - template: templates/container-scan-template.yml
