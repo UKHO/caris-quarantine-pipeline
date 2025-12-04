@@ -28,7 +28,10 @@ stages:
   jobs:
   - job: ContainerScan
     displayName: 'Scan Pushed Image'
-    pool: Mare Nectaris
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
     steps:
     - task: Docker@2
       displayName: 'Login to Source Registry'
@@ -61,7 +64,10 @@ stages:
   jobs:
   - job: PushToPre
     displayName: 'Push to Pre ACR'
-    pool: Mare Nectaris
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
     variables:
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       preImageRepository: 'scanned/${{ parameters.sourceRepository }}'
@@ -113,7 +119,10 @@ stages:
   jobs:
   - job: PullTagAndPush
     displayName: 'Pull, Tag and Push the image to the Private ACR'
-    pool: Mare Nectaris
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
     variables:
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       destinationImageRepository: 'scanned/${{ parameters.sourceRepository }}'
@@ -197,7 +206,10 @@ stages:
   jobs:
   - job: PushPreVulnerableImage
     displayName: 'Push Vulnerable Image to Pre vulnerable namespace'
-    pool: Mare Nectaris
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
     variables:
       vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
       preVulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
@@ -239,7 +251,10 @@ stages:
   - job: PushVulnerableImage
     displayName: 'Push Vulnerable Image to vulnerable namespace'
     dependsOn: PushPreVulnerableImage
-    pool: Mare Nectaris
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
     variables:
       vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
       vulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
