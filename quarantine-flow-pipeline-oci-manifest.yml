@@ -12,7 +12,7 @@ resources:
 variables:
   - group: caris-quarantine
   - name: sourceRegistryServiceConnection
-    value: 'publiccrlive-docker'
+    value: 'publiccrlive-docker' 
   - name: destinationRegistryServiceConnection
     value: 'carisliveacr-docker'
   - name: preRegistryServiceConnection
