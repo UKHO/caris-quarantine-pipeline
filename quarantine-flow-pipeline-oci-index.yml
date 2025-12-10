@@ -15,7 +15,7 @@ variables:
     value: 'publiccrlive-docker'
   - name: destinationRegistryServiceConnection
     value: 'carisliveacr-docker'
-  - name: preRegistryServiceConnectionyeah i can wire that
+  - name: preRegistryServiceConnection
     value: 'carispreacr-docker'
   - name: destinationRegistry
     value: 'carisliveacr.azurecr.io'
