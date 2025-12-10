@@ -7,12 +7,12 @@ resources:
       connection: AcrWebhookConnection
       filters:
         - path: target.mediaType
-          value: "application/vnd.docker.distribution.manifest.v2+json"
+          value: "application/vnd.oci.image.manifest.v1+json"
 
 variables:
   - group: caris-quarantine
   - name: sourceRegistryServiceConnection
-    value: 'publiccrlive-docker'
+    value: 'publiccrlive-docker' 
   - name: destinationRegistryServiceConnection
     value: 'carisliveacr-docker'
   - name: preRegistryServiceConnection
