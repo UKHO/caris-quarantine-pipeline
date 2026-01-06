@@ -11,6 +11,12 @@ resources:
 
 variables:
   - group: caris-quarantine
+  - name: sourceAzureSubscription
+    value: 'quarantine-helm-publicacr'
+  - name: preAzureSubscription
+    value: 'quarantine-helm-preacr'
+  - name: liveAzureSubscription
+    value: 'quarantine-helm-liveacr'
   - name: sourceRegistryServiceConnection
     value: 'publiccrlive-docker' 
   - name: destinationRegistryServiceConnection
@@ -29,6 +35,9 @@ variables:
 stages:
 - template: templates/helm-scan-template.yml
   parameters:
+    sourceAzureSubscription: '$(sourceAzureSubscription)'
+    preAzureSubscription: '$(preAzureSubscription)'
+    liveAzureSubscription: '$(liveAzureSubscription)'
     sourceRegistryServiceConnection: '$(sourceRegistryServiceConnection)'
     destinationRegistryServiceConnection: '$(destinationRegistryServiceConnection)'
     preRegistryServiceConnection: '$(preRegistryServiceConnection)'

@@ -1,4 +1,6 @@
 parameters:
+  - name: sourceAzureSubscription
+    type: string
   - name: sourceRegistryServiceConnection
     type: string
   - name: destinationRegistryServiceConnection
@@ -36,7 +38,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Check if Helm Chart'
       inputs:
-        azureSubscription: '${{ parameters.sourceRegistryServiceConnection }}'
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |

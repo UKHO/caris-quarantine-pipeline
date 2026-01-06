@@ -1,4 +1,10 @@
 parameters:
+  - name: sourceAzureSubscription
+    type: string
+  - name: preAzureSubscription
+    type: string
+  - name: liveAzureSubscription
+    type: string
   - name: sourceRegistryServiceConnection
     type: string
   - name: destinationRegistryServiceConnection
@@ -36,7 +42,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Login to ACR and Pull Helm Chart'
       inputs:
-        azureSubscription: '${{ parameters.sourceRegistryServiceConnection }}'
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
@@ -86,15 +92,14 @@ stages:
       preChartRepository: 'scanned/${{ parameters.sourceRepository }}'
     steps:
     - task: AzureCLI@2
-      displayName: 'Pull and Push Helm Chart to Pre ACR'
+      displayName: 'Pull Helm Chart from Source ACR'
       inputs:
-        azureSubscription: '${{ parameters.sourceRegistryServiceConnection }}'
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          # Extract registry names
+          # Extract registry name
           $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
-          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
           
           # Login to source ACR
           az acr login --name $sourceRegistryName
@@ -110,11 +115,7 @@ stages:
           # Get the downloaded chart file
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
           
-          # Login to Pre ACR
-          az acr login --name $preRegistryName
-          
-          # Push to Pre ACR (note: helm push uses chart version from Chart.yaml, not from filename)
-          # We'll need to extract, modify version, and repackage
+          # Extract and modify version
           $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage" -Force
           tar -xzf $chartFile.FullName -C $extractDir.FullName
           
@@ -126,11 +127,25 @@ stages:
           
           # Repackage with new version
           $repackagedChart = helm package $chartName.FullName --destination $chartDir.FullName
+          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
+
+    - task: AzureCLI@2
+      displayName: 'Push Helm Chart to Pre ACR'
+      inputs:
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name
+          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          
+          # Login to Pre ACR
+          az acr login --name $preRegistryName
           
           # Push to Pre ACR
           $preChartRef = "oci://${{ parameters.preRegistry }}/$(preChartRepository)"
           Write-Host "Pushing Helm chart to: $preChartRef"
-          helm push $repackagedChart $preChartRef
+          helm push $(repackagedChartPath) $preChartRef
 
 - stage: PushToPrivateRepo
   displayName: 'Push scanned Helm chart to Private Repo'
@@ -148,15 +163,14 @@ stages:
       preChartRepository: 'scanned/${{ parameters.sourceRepository }}'
     steps:
     - task: AzureCLI@2
-      displayName: 'Pull from Pre and Push to Live ACR'
+      displayName: 'Pull Helm Chart from Pre ACR'
       inputs:
-        azureSubscription: '${{ parameters.preRegistryServiceConnection }}'
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          # Extract registry names
+          # Extract registry name
           $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
-          $liveRegistryName = "${{ parameters.destinationRegistry }}" -split '\.' | Select-Object -First 1
           
           # Create temp directory
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
@@ -172,9 +186,6 @@ stages:
           # Get the downloaded chart file
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
           
-          # Login to Live ACR
-          az acr login --name $liveRegistryName
-          
           # Extract and modify chart version back to original
           $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage-live" -Force
           tar -xzf $chartFile.FullName -C $extractDir.FullName
@@ -187,12 +198,36 @@ stages:
           
           # Repackage with original version
           $repackagedChart = helm package $chartName.FullName --destination $chartDir.FullName
+          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
+
+    - task: AzureCLI@2
+      displayName: 'Push Helm Chart to Live ACR'
+      inputs:
+        azureSubscription: '${{ parameters.liveAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name
+          $liveRegistryName = "${{ parameters.destinationRegistry }}" -split '\.' | Select-Object -First 1
+          
+          # Login to Live ACR
+          az acr login --name $liveRegistryName
           
           # Push to Live ACR
           $liveChartRef = "oci://${{ parameters.destinationRegistry }}/${{ parameters.sourceRepository }}"
           Write-Host "Pushing Helm chart to: $liveChartRef"
-          helm push $repackagedChart $liveChartRef
+          helm push $(repackagedChartPath) $liveChartRef
 
+- stage: AlertOnSuccess
+  displayName: 'Alert on Helm Chart Success'
+  dependsOn: PushToPrivateRepo
+  condition: succeeded()
+  jobs:
+  - job: SendSuccessNotification
+    displayName: 'Send Success Notification'
+    pool:
+      name: Mare Nectaris
+    steps:
     - task: PowerShell@2
       displayName: 'Notify Success'
       inputs:
@@ -226,15 +261,14 @@ stages:
       vulnerableChartRepository: 'vulnerable/${{ parameters.sourceRepository }}'
     steps:
     - task: AzureCLI@2
-      displayName: 'Pull and Push Vulnerable Chart'
+      displayName: 'Pull Vulnerable Chart from Source'
       inputs:
-        azureSubscription: '${{ parameters.sourceRegistryServiceConnection }}'
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          # Extract registry names
+          # Extract registry name
           $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
-          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
           
           # Create temp directory
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-vulnerable" -Force
@@ -250,9 +284,6 @@ stages:
           # Get the downloaded chart file
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
           
-          # Login to Pre ACR
-          az acr login --name $preRegistryName
-          
           # Extract and modify version for vulnerable tag
           $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage-vuln" -Force
           tar -xzf $chartFile.FullName -C $extractDir.FullName
@@ -265,11 +296,25 @@ stages:
           
           # Repackage with vulnerable version
           $repackagedChart = helm package $chartName.FullName --destination $chartDir.FullName
+          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
+
+    - task: AzureCLI@2
+      displayName: 'Push Vulnerable Chart to Pre ACR'
+      inputs:
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name
+          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          
+          # Login to Pre ACR
+          az acr login --name $preRegistryName
           
           # Push to vulnerable path in Pre ACR
           $vulnerableChartRef = "oci://${{ parameters.preRegistry }}/$(vulnerableChartRepository)"
           Write-Host "Pushing vulnerable chart to: $vulnerableChartRef"
-          helm push $repackagedChart $vulnerableChartRef
+          helm push $(repackagedChartPath) $vulnerableChartRef
 
     - task: PowerShell@2
       displayName: 'Notify Failure'
