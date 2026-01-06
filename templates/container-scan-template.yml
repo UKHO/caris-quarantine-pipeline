@@ -530,39 +530,38 @@ stages:
       preChartRepository: 'scanned/${{ parameters.sourceRepository }}'
     steps:
     - task: AzureCLI@2
-      displayName: 'Pull Helm Chart from Pre ACR'
+      displayName: 'Pull Helm Chart from Source ACR and Repackage'
       inputs:
-        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          # Extract registry names
-          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          # Extract registry name
           $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
           
-          # Login to source ACR to get original version (same as Pre stage does)
+          # Login to source ACR
           az acr login --name $sourceRegistryName
           
+          # Get the chart version from manifest (same method as Pre stage)
           $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
-          $originalVersion = $manifest.config.annotations.'org.opencontainers.image.version'
+          $chartVersion = $manifest.config.annotations.'org.opencontainers.image.version'
           
-          if ([string]::IsNullOrWhiteSpace($originalVersion)) {
+          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
             Write-Host "##[warning]Could not determine chart version from manifest, using sourceTag parameter"
-            $originalVersion = "${{ parameters.sourceTag }}"
+            $chartVersion = "${{ parameters.sourceTag }}"
           }
           
-          $scannedVersion = "$originalVersion-snyk-scanned"
-          
-          Write-Host "Original version from source: $originalVersion"
+          Write-Host "Original chart version: $chartVersion"
+          $scannedVersion = "$chartVersion-snyk-scanned"
           Write-Host "Will pull scanned version from Pre: $scannedVersion"
           
           # Create temp directory
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
           
-          # Login to Pre ACR
+          # Login to Pre ACR and pull scanned chart
+          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
           az acr login --name $preRegistryName
           
-          # Pull the scanned chart from Pre
           $preChartRef = "oci://${{ parameters.preRegistry }}/$(preChartRepository)"
           Write-Host "Pulling scanned Helm chart from: $preChartRef --version $scannedVersion"
           helm pull $preChartRef --version $scannedVersion --destination $chartDir.FullName
@@ -576,7 +575,7 @@ stages:
           
           $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
           $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
-          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $originalVersion"
+          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $chartVersion"
           Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
           
           # Repackage with original version
@@ -588,7 +587,7 @@ stages:
             $repackagedChart = $matches[1]
           } else {
             # Fallback: find the .tgz file
-            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$originalVersion.tgz" | Select-Object -First 1).FullName
+            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$chartVersion.tgz" | Select-Object -First 1).FullName
           }
           
           Write-Host "Repackaged chart path: $repackagedChart"
