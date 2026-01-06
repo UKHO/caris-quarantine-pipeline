@@ -506,7 +506,19 @@ stages:
           Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
           
           # Repackage with new version
-          $repackagedChart = helm package $chartName.FullName --destination $chartDir.FullName
+          $packageOutput = helm package $chartName.FullName --destination $chartDir.FullName
+          Write-Host $packageOutput
+          
+          # Extract the actual file path from helm package output
+          # Output format: "Successfully packaged chart and saved it to: /path/to/chart.tgz"
+          if ($packageOutput -match ':\s+(.+\.tgz)$') {
+            $repackagedChart = $matches[1]
+          } else {
+            # Fallback: find the .tgz file
+            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$newVersion.tgz" | Select-Object -First 1).FullName
+          }
+          
+          Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
     - task: AzureCLI@2
@@ -608,7 +620,18 @@ stages:
           Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
           
           # Repackage with original version
-          $repackagedChart = helm package $chartName.FullName --destination $chartDir.FullName
+          $packageOutput = helm package $chartName.FullName --destination $chartDir.FullName
+          Write-Host $packageOutput
+          
+          # Extract the actual file path from helm package output
+          if ($packageOutput -match ':\s+(.+\.tgz)$') {
+            $repackagedChart = $matches[1]
+          } else {
+            # Fallback: find the .tgz file
+            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$originalVersion.tgz" | Select-Object -First 1).FullName
+          }
+          
+          Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
     - task: AzureCLI@2
@@ -716,7 +739,18 @@ stages:
           Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
           
           # Repackage with vulnerable version
-          $repackagedChart = helm package $chartName.FullName --destination $chartDir.FullName
+          $packageOutput = helm package $chartName.FullName --destination $chartDir.FullName
+          Write-Host $packageOutput
+          
+          # Extract the actual file path from helm package output
+          if ($packageOutput -match ':\s+(.+\.tgz)$') {
+            $repackagedChart = $matches[1]
+          } else {
+            # Fallback: find the .tgz file
+            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$vulnerableVersion.tgz" | Select-Object -First 1).FullName
+          }
+          
+          Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
     - task: AzureCLI@2
