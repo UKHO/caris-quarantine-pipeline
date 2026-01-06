@@ -460,7 +460,6 @@ stages:
       demands:
       - ENVIRONMENT -equals ENG
     variables:
-      scannedChartTag: '$(helmChartVersion)-snyk-scanned'
       preChartRepository: 'scanned/${{ parameters.sourceRepository }}'
     steps:
     - task: AzureCLI@2
@@ -476,13 +475,21 @@ stages:
           # Login to source ACR
           az acr login --name $sourceRegistryName
           
-          # Get chart version
-          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
-          $chartVersion = $manifest.config.annotations.'org.opencontainers.image.version'
-          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
+          # Get chart version - list all tags and get the latest one
+          $tags = az acr repository show-tags --name $sourceRegistryName --repository ${{ parameters.sourceRepository }} --orderby time_desc --output json | ConvertFrom-Json
+          if ($tags -and $tags.Count -gt 0) {
+            $chartVersion = $tags[0]
+          } else {
             $chartVersion = "${{ parameters.sourceTag }}"
           }
-          Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
+          
+          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
+            Write-Host "##[error]Could not determine chart version"
+            exit 1
+          }
+          
+          Write-Host "Chart version: $chartVersion"
+          Write-Host "##vso[task.setvariable variable=scannedChartTag]$chartVersion-snyk-scanned"
           
           # Create temp directory
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-push" -Force
