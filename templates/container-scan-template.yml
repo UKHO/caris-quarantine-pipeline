@@ -476,12 +476,22 @@ stages:
           # Login to source ACR
           az acr login --name $sourceRegistryName
           
-          # Get chart version
-          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
-          $chartVersion = $manifest.config.annotations.'org.opencontainers.image.version'
-          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
+          # Get chart version by listing repository tags (most recent first)
+          $tags = az acr repository show-tags --name $sourceRegistryName --repository ${{ parameters.sourceRepository }} --orderby time_desc --output json | ConvertFrom-Json
+          if ($tags -and $tags.Count -gt 0) {
+            $chartVersion = $tags[0]
+            Write-Host "Found chart version from tags: $chartVersion"
+          } else {
+            Write-Host "##[warning]No tags found, trying sourceTag parameter"
             $chartVersion = "${{ parameters.sourceTag }}"
           }
+          
+          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
+            Write-Host "##[error]Could not determine chart version"
+            exit 1
+          }
+          
+          Write-Host "Using chart version: $chartVersion"
           Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
           
           # Create temp directory
