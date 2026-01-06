@@ -46,6 +46,6 @@ stages:
     snykServiceConnection: '$(snykServiceConnection)'
     snykOrganization: '$(snykOrganization)'
     teamsWebhookEndpoint: '$(teamsWebhookEndpoint)'
-    sourceRepository: ${{ coalesce(parameters.AcrHelmWebhookTrigger.target.repository, 'unknown') }}
-    sourceTag: ${{ coalesce(parameters.AcrHelmWebhookTrigger.target.tag, parameters.AcrHelmWebhookTrigger.target.version, 'unknown') }}
-    sourceHost: ${{ coalesce(parameters.AcrHelmWebhookTrigger.request.host, 'unknown') }}
+    sourceRepository: ${{ coalesce(parameters.AcrHelmWebhookTrigger.target.repository, parameters.AcrHelmWebhookTrigger.request.target.repository, 'unknown') }}
+    sourceTag: ${{ coalesce(parameters.AcrHelmWebhookTrigger.target.tag, parameters.AcrHelmWebhookTrigger.target.version, parameters.AcrHelmWebhookTrigger.request.target.tag, 'unknown') }}
+    sourceHost: ${{ coalesce(parameters.AcrHelmWebhookTrigger.request.host, parameters.AcrHelmWebhookTrigger.target.url, 'publiccrlive.azurecr.io') }}
