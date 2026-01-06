@@ -3,7 +3,7 @@ pr: none
 
 resources:
   webhooks:
-    - webhook: AcrWebhookTrigger
+    - webhook: AcrHelmWebhookTrigger
       connection: AcrWebhookConnection
       filters:
         - path: target.mediaType
@@ -46,6 +46,6 @@ stages:
     snykServiceConnection: '$(snykServiceConnection)'
     snykOrganization: '$(snykOrganization)'
     teamsWebhookEndpoint: '$(teamsWebhookEndpoint)'
-    sourceRepository: ${{ coalesce(parameters.AcrWebhookTrigger.target.repository, 'unknown') }}
-    sourceTag: ${{ coalesce(parameters.AcrWebhookTrigger.target.tag, parameters.AcrWebhookTrigger.target.version, 'unknown') }}
-    sourceHost: ${{ coalesce(parameters.AcrWebhookTrigger.request.host, 'unknown') }}
+    sourceRepository: ${{ coalesce(parameters.AcrHelmWebhookTrigger.target.repository, 'unknown') }}
+    sourceTag: ${{ coalesce(parameters.AcrHelmWebhookTrigger.target.tag, parameters.AcrHelmWebhookTrigger.target.version, 'unknown') }}
+    sourceHost: ${{ coalesce(parameters.AcrHelmWebhookTrigger.request.host, 'unknown') }}
