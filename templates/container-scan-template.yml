@@ -544,6 +544,30 @@ stages:
       preChartRepository: 'scanned/${{ parameters.sourceRepository }}'
     steps:
     - task: AzureCLI@2
+      displayName: 'Get Chart Version from Source'
+      inputs:
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name and get chart version from source
+          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
+          az acr login --name $sourceRegistryName
+          
+          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
+          $originalVersion = $manifest.config.annotations.'org.opencontainers.image.version'
+          if ([string]::IsNullOrWhiteSpace($originalVersion)) {
+            $originalVersion = "${{ parameters.sourceTag }}"
+          }
+          $scannedVersion = "$originalVersion-snyk-scanned"
+          
+          Write-Host "Original chart version: $originalVersion"
+          Write-Host "Scanned chart version: $scannedVersion"
+          Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$originalVersion"
+          Write-Host "##vso[task.setvariable variable=scannedChartTag;isOutput=true]$scannedVersion"
+      name: getVersion
+    
+    - task: AzureCLI@2
       displayName: 'Pull Helm Chart from Pre ACR'
       inputs:
         azureSubscription: '${{ parameters.preAzureSubscription }}'
@@ -553,17 +577,12 @@ stages:
           # Extract registry name
           $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
           
-          # Get original chart version
-          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
-          az acr login --name $sourceRegistryName
-          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
-          $originalVersion = $manifest.config.annotations.'org.opencontainers.image.version'
-          if ([string]::IsNullOrWhiteSpace($originalVersion)) {
-            $originalVersion = "${{ parameters.sourceTag }}"
-          }
-          $scannedVersion = "$originalVersion-snyk-scanned"
-          Write-Host "##vso[task.setvariable variable=helmChartVersion]$originalVersion"
-          Write-Host "##vso[task.setvariable variable=scannedChartTag]$scannedVersion"
+          # Get version from previous task
+          $originalVersion = "$(getVersion.helmChartVersion)"
+          $scannedVersion = "$(getVersion.scannedChartTag)"
+          
+          Write-Host "Will pull chart with version: $scannedVersion"
+          Write-Host "Will repackage with version: $originalVersion"
           
           # Create temp directory
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
