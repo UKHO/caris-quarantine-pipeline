@@ -39,6 +39,15 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     steps:
+    - task: PowerShell@2
+      displayName: 'Debug Webhook Payload'
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "Source Host: ${{ parameters.sourceHost }}"
+          Write-Host "Source Repository: ${{ parameters.sourceRepository }}"
+          Write-Host "Source Tag: ${{ parameters.sourceTag }}"
+          
     - task: AzureCLI@2
       displayName: 'Login to ACR and Pull Helm Chart'
       inputs:
