@@ -536,26 +536,25 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          # Extract registry name
+          # Extract registry names
           $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
           
-          # Login to Pre ACR
-          az acr login --name $preRegistryName
+          # Login to source ACR to get original version (same as Pre stage does)
+          az acr login --name $sourceRegistryName
           
-          # Get the scanned chart version from Pre ACR manifest (same method as source stages)
-          $manifest = az acr manifest show --name $(preChartRepository) --registry $preRegistryName --output json | ConvertFrom-Json
-          $scannedVersion = $manifest.config.annotations.'org.opencontainers.image.version'
+          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
+          $originalVersion = $manifest.config.annotations.'org.opencontainers.image.version'
           
-          if ([string]::IsNullOrWhiteSpace($scannedVersion)) {
-            Write-Host "##[error]Could not determine scanned chart version from Pre ACR"
-            exit 1
+          if ([string]::IsNullOrWhiteSpace($originalVersion)) {
+            Write-Host "##[warning]Could not determine chart version from manifest, using sourceTag parameter"
+            $originalVersion = "${{ parameters.sourceTag }}"
           }
           
-          # Strip -snyk-scanned suffix to get original version
-          $originalVersion = $scannedVersion -replace '-snyk-scanned$', ''
+          $scannedVersion = "$originalVersion-snyk-scanned"
           
-          Write-Host "Scanned chart version from Pre: $scannedVersion"
-          Write-Host "Will repackage to original version: $originalVersion"
+          Write-Host "Original version from source: $originalVersion"
+          Write-Host "Will pull scanned version from Pre: $scannedVersion"
           
           # Create temp directory
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
