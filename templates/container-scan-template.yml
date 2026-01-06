@@ -524,8 +524,10 @@ stages:
           
           # Push to Pre ACR
           $preChartRef = "oci://${{ parameters.preRegistry }}/$(preChartRepository)"
+          $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing Helm chart to: $preChartRef"
-          helm push $(repackagedChartPath) $preChartRef
+          Write-Host "Chart file: $chartPath"
+          helm push $chartPath $preChartRef
 
 - stage: PushHelmToPrivateRepo
   displayName: 'Push scanned Helm chart to Live ACR'
@@ -605,8 +607,10 @@ stages:
           
           # Push to Live ACR
           $liveChartRef = "oci://${{ parameters.destinationRegistry }}/${{ parameters.sourceRepository }}"
+          $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing Helm chart to: $liveChartRef"
-          helm push $(repackagedChartPath) $liveChartRef
+          Write-Host "Chart file: $chartPath"
+          helm push $chartPath $liveChartRef
 
 - stage: AlertOnHelmSuccess
   displayName: 'Alert that Helm scan completed successfully'
@@ -711,8 +715,10 @@ stages:
           
           # Push to vulnerable path in Pre ACR
           $vulnerableChartRef = "oci://${{ parameters.preRegistry }}/$(vulnerableChartRepository)"
+          $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing vulnerable chart to: $vulnerableChartRef"
-          helm push $(repackagedChartPath) $vulnerableChartRef
+          Write-Host "Chart file: $chartPath"
+          helm push $chartPath $vulnerableChartRef
 
   - job: SendHelmFailureTeamsMessage
     displayName: 'Send Helm Failure Alert to Teams Channel'
