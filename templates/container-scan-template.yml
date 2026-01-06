@@ -73,19 +73,6 @@ stages:
           }
       name: detectType
 
-    - task: PowerShell@2
-      displayName: 'Detection Complete'
-      condition: always()
-      inputs:
-        targetType: 'inline'
-        script: |
-          $isHelm = "$(detectType.isHelmChart)"
-          if ($isHelm -eq 'true') {
-            Write-Host "✓ Artifact type: Helm Chart - will proceed to Helm scanning stages"
-          } else {
-            Write-Host "✓ Artifact type: Container Image - will proceed to container scanning stages"
-          }
-
     - task: Docker@2
       displayName: 'Login to Source Registry'
       condition: eq(variables['detectType.isHelmChart'], 'false')
@@ -162,12 +149,6 @@ stages:
         command: 'push'
         tags: '$(scannedImageTag)'
 
-    - script: |
-        echo "✅ Container pushed to Pre ACR successfully!"
-        echo "Source image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
-        echo "Pre image: $(fullPreImageName)"
-      displayName: 'Pre Push Summary'
-
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Private ACR'
   dependsOn: PushToPreACR
@@ -216,12 +197,6 @@ stages:
         repository: '$(destinationImageRepository)'
         command: 'push'
         tags: '$(scannedImageTag)'
-
-    - script: |
-        echo "✅ Container scanning and push completed successfully!"
-        echo "Source image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
-        echo "Destination image: $(fullDestinationImageName)"
-      displayName: 'Pipeline Summary'
 
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
@@ -377,11 +352,6 @@ stages:
           } | ConvertTo-Json
           
           Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
-
-    - script: |
-        echo "❌ Container scanning failed!"
-        echo "Source image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
-      displayName: 'Pipeline Summary'
 
 # ============================================
 # HELM CHART SCANNING STAGES (run when isHelmChart == 'true')
@@ -560,30 +530,6 @@ stages:
       preChartRepository: 'scanned/${{ parameters.sourceRepository }}'
     steps:
     - task: AzureCLI@2
-      displayName: 'Get Chart Version from Source'
-      inputs:
-        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          # Extract registry name and get chart version from source
-          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
-          az acr login --name $sourceRegistryName
-          
-          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
-          $originalVersion = $manifest.config.annotations.'org.opencontainers.image.version'
-          if ([string]::IsNullOrWhiteSpace($originalVersion)) {
-            $originalVersion = "${{ parameters.sourceTag }}"
-          }
-          $scannedVersion = "$originalVersion-snyk-scanned"
-          
-          Write-Host "Original chart version: $originalVersion"
-          Write-Host "Scanned chart version: $scannedVersion"
-          Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$originalVersion"
-          Write-Host "##vso[task.setvariable variable=scannedChartTag;isOutput=true]$scannedVersion"
-      name: getVersion
-    
-    - task: AzureCLI@2
       displayName: 'Pull Helm Chart from Pre ACR'
       inputs:
         azureSubscription: '${{ parameters.preAzureSubscription }}'
@@ -593,12 +539,23 @@ stages:
           # Extract registry name
           $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
           
-          # Get version from previous task
-          $originalVersion = "$(getVersion.helmChartVersion)"
-          $scannedVersion = "$(getVersion.scannedChartTag)"
+          # Login to Pre ACR
+          az acr login --name $preRegistryName
           
-          Write-Host "Will pull chart with version: $scannedVersion"
-          Write-Host "Will repackage with version: $originalVersion"
+          # Get the scanned chart version from Pre ACR manifest (same method as source stages)
+          $manifest = az acr manifest show --name $(preChartRepository) --registry $preRegistryName --output json | ConvertFrom-Json
+          $scannedVersion = $manifest.config.annotations.'org.opencontainers.image.version'
+          
+          if ([string]::IsNullOrWhiteSpace($scannedVersion)) {
+            Write-Host "##[error]Could not determine scanned chart version from Pre ACR"
+            exit 1
+          }
+          
+          # Strip -snyk-scanned suffix to get original version
+          $originalVersion = $scannedVersion -replace '-snyk-scanned$', ''
+          
+          Write-Host "Scanned chart version from Pre: $scannedVersion"
+          Write-Host "Will repackage to original version: $originalVersion"
           
           # Create temp directory
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
@@ -800,9 +757,4 @@ stages:
           } | ConvertTo-Json
           
           Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
-
-    - script: |
-        echo "❌ Helm chart scanning failed!"
-        echo "Source chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
-      displayName: 'Pipeline Summary'
 
