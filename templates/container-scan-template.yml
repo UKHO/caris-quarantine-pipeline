@@ -530,7 +530,7 @@ stages:
       preChartRepository: 'scanned/${{ parameters.sourceRepository }}'
     steps:
     - task: AzureCLI@2
-      displayName: 'Pull Helm Chart from Source ACR and Repackage'
+      displayName: 'Get Chart Version from Source ACR'
       inputs:
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         scriptType: 'pscore'
@@ -553,7 +553,24 @@ stages:
           
           Write-Host "Original chart version: $chartVersion"
           $scannedVersion = "$chartVersion-snyk-scanned"
+          
+          Write-Host "##vso[task.setvariable variable=originalVersion;isOutput=true]$chartVersion"
+          Write-Host "##vso[task.setvariable variable=scannedVersion;isOutput=true]$scannedVersion"
+      name: getVersion
+    
+    - task: AzureCLI@2
+      displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
+      inputs:
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Get versions from previous task
+          $chartVersion = "$(getVersion.originalVersion)"
+          $scannedVersion = "$(getVersion.scannedVersion)"
+          
           Write-Host "Will pull scanned version from Pre: $scannedVersion"
+          Write-Host "Will repackage to original version: $chartVersion"
           
           # Create temp directory
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
@@ -568,6 +585,12 @@ stages:
           
           # Get the downloaded chart file
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
+          
+          if (-not $chartFile) {
+            Write-Host "##[error]Failed to pull chart from Pre ACR. The az acr login for Pre ACR likely failed because this task is authenticated to source subscription, not Pre subscription."
+            Write-Host "##[error]Chart was not found in: $($chartDir.FullName)"
+            exit 1
+          }
           
           # Extract and modify chart version back to original
           $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage-live" -Force
