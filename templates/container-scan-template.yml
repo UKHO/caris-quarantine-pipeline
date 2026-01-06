@@ -33,14 +33,40 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     steps:
+    - task: AzureCLI@2
+      displayName: 'Check if Helm Chart'
+      inputs:
+        azureSubscription: '${{ parameters.sourceRegistryServiceConnection }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Get manifest to check media type
+          $registryName = "${{ parameters.sourceHost }}".Split('.')[0]
+          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} --registry $registryName --output json | ConvertFrom-Json
+          
+          # Check if this is a Helm chart by looking at config media type
+          $isHelmChart = $manifest.config.mediaType -eq "application/vnd.cncf.helm.config.v1+json"
+          
+          if ($isHelmChart) {
+            Write-Host "##[warning]Detected Helm chart - skipping container scan pipeline"
+            Write-Host "##vso[task.setvariable variable=isHelmChart;isOutput=true]true"
+            Write-Host "##vso[task.complete result=Skipped;]Helm chart detected - use helm pipeline instead"
+            exit 0
+          } else {
+            Write-Host "##vso[task.setvariable variable=isHelmChart;isOutput=true]false"
+          }
+      name: detectType
+
     - task: Docker@2
       displayName: 'Login to Source Registry'
+      condition: eq(variables['detectType.isHelmChart'], 'false')
       inputs:
         containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
         command: 'login'
 
     - task: PowerShell@2
       displayName: 'Pull Published Image'
+      condition: eq(variables['detectType.isHelmChart'], 'false')
       inputs:
         targetType: 'inline'
         script: |
@@ -48,6 +74,7 @@ stages:
 
     - task: UkhoSnykScanTask@0
       displayName: 'Snyk container scan'
+      condition: eq(variables['detectType.isHelmChart'], 'false')
       inputs:
         failOnIssues: true
         organization: '${{ parameters.snykOrganization }}'
@@ -60,7 +87,7 @@ stages:
 - stage: PushToPreACR
   displayName: 'Push scanned image to Pre ACR'
   dependsOn: ScanContainer
-  condition: succeeded()
+  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
   jobs:
   - job: PushToPre
     displayName: 'Push to Pre ACR'
@@ -115,7 +142,7 @@ stages:
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Private ACR'
   dependsOn: PushToPreACR
-  condition: succeeded()
+  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
   jobs:
   - job: PullTagAndPush
     displayName: 'Pull, Tag and Push the image to the Private ACR'
@@ -170,7 +197,7 @@ stages:
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
   dependsOn: [PushToPreACR, PushToPrivateRepo]
-  condition: succeeded()
+  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
   jobs:
   - job: SendSuccessTeamsMessage
     displayName: 'Send Success Alert to Teams Channel'
@@ -202,7 +229,7 @@ stages:
 - stage: AlertOnFail
   displayName: 'Alert that vulnerable image present'
   dependsOn: ScanContainer
-  condition: failed()
+  condition: and(failed(), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
   jobs:
   - job: PushPreVulnerableImage
     displayName: 'Push Vulnerable Image to Pre vulnerable namespace'

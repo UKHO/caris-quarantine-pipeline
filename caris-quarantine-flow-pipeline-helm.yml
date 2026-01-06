@@ -1,0 +1,42 @@
+trigger: none
+pr: none
+
+resources:
+  webhooks:
+    - webhook: AcrWebhookTrigger
+      connection: AcrWebhookConnection
+      filters:
+        - path: target.mediaType
+          value: "application/vnd.cncf.helm.config.v1+json"
+
+variables:
+  - group: caris-quarantine
+  - name: sourceRegistryServiceConnection
+    value: 'publiccrlive-docker' 
+  - name: destinationRegistryServiceConnection
+    value: 'carisliveacr-docker'
+  - name: preRegistryServiceConnection
+    value: 'carispreacr-docker'
+  - name: destinationRegistry
+    value: 'carisliveacr.azurecr.io'
+  - name: preRegistry
+    value: 'carispreacr.azurecr.io'
+  - name: snykServiceConnection
+    value: 'SnykAuth'
+  - name: snykOrganization
+    value: 'caris-cloud'
+
+stages:
+- template: templates/helm-scan-template.yml
+  parameters:
+    sourceRegistryServiceConnection: '$(sourceRegistryServiceConnection)'
+    destinationRegistryServiceConnection: '$(destinationRegistryServiceConnection)'
+    preRegistryServiceConnection: '$(preRegistryServiceConnection)'
+    destinationRegistry: '$(destinationRegistry)'
+    preRegistry: '$(preRegistry)'
+    snykServiceConnection: '$(snykServiceConnection)'
+    snykOrganization: '$(snykOrganization)'
+    teamsWebhookEndpoint: '$(teamsWebhookEndpoint)'
+    sourceRepository: ${{ parameters.AcrWebhookTrigger.target.repository }}
+    sourceTag: ${{ parameters.AcrWebhookTrigger.target.tag }}
+    sourceHost: ${{ parameters.AcrWebhookTrigger.request.host }}

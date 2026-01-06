@@ -1,0 +1,288 @@
+parameters:
+  - name: sourceRegistryServiceConnection
+    type: string
+  - name: destinationRegistryServiceConnection
+    type: string
+  - name: preRegistryServiceConnection
+    type: string
+  - name: destinationRegistry
+    type: string
+  - name: preRegistry
+    type: string
+  - name: snykServiceConnection
+    type: string
+  - name: snykOrganization
+    type: string
+  - name: teamsWebhookEndpoint
+    type: string
+  - name: sourceRepository
+    type: string
+  - name: sourceTag
+    type: string
+  - name: sourceHost
+    type: string
+
+stages:
+- stage: ScanHelmChart
+  displayName: 'Scan Helm Chart'
+  jobs:
+  - job: HelmChartScan
+    displayName: 'Scan Pushed Helm Chart'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Login to ACR and Pull Helm Chart'
+      inputs:
+        azureSubscription: '${{ parameters.sourceRegistryServiceConnection }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name from host
+          $registryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
+          
+          # Login to ACR
+          az acr login --name $registryName
+          
+          # Create temp directory for chart
+          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts" -Force
+          
+          # Pull the Helm chart
+          $chartReference = "oci://${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
+          Write-Host "Pulling Helm chart: $chartReference with tag ${{ parameters.sourceTag }}"
+          helm pull $chartReference --version ${{ parameters.sourceTag }} --destination $chartDir.FullName --untar
+          
+          # Set variable for extracted chart path
+          $extractedChart = Get-ChildItem -Path $chartDir.FullName -Directory | Select-Object -First 1
+          Write-Host "##vso[task.setvariable variable=helmChartPath]$($extractedChart.FullName)"
+          Write-Host "Helm chart extracted to: $($extractedChart.FullName)"
+
+    - task: UkhoSnykScanTask@0
+      displayName: 'Snyk IaC scan for Helm Chart'
+      inputs:
+        failOnIssues: true
+        organization: '${{ parameters.snykOrganization }}'
+        serviceConnectionEndpoint: '${{ parameters.snykServiceConnection }}'
+        testType: iac
+        monitorWhen: always
+        severityThreshold: high
+        targetFile: '$(helmChartPath)'
+
+- stage: PushToPreACR
+  displayName: 'Push scanned Helm chart to Pre ACR'
+  dependsOn: ScanHelmChart
+  condition: succeeded()
+  jobs:
+  - job: PushHelmToPre
+    displayName: 'Push Helm Chart to Pre ACR'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
+    variables:
+      scannedChartTag: '${{ parameters.sourceTag }}-snyk-scanned'
+      preChartRepository: 'scanned/${{ parameters.sourceRepository }}'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Pull and Push Helm Chart to Pre ACR'
+      inputs:
+        azureSubscription: '${{ parameters.sourceRegistryServiceConnection }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry names
+          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
+          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          
+          # Login to source ACR
+          az acr login --name $sourceRegistryName
+          
+          # Create temp directory
+          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-push" -Force
+          
+          # Pull the Helm chart
+          $chartReference = "oci://${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
+          Write-Host "Pulling Helm chart: $chartReference with tag ${{ parameters.sourceTag }}"
+          helm pull $chartReference --version ${{ parameters.sourceTag }} --destination $chartDir.FullName
+          
+          # Get the downloaded chart file
+          $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
+          
+          # Login to Pre ACR
+          az acr login --name $preRegistryName
+          
+          # Push to Pre ACR (note: helm push uses chart version from Chart.yaml, not from filename)
+          # We'll need to extract, modify version, and repackage
+          $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage" -Force
+          tar -xzf $chartFile.FullName -C $extractDir.FullName
+          
+          $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
+          $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
+          $newVersion = "$(scannedChartTag)"
+          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $newVersion"
+          Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
+          
+          # Repackage with new version
+          $repackagedChart = helm package $chartName.FullName --destination $chartDir.FullName
+          
+          # Push to Pre ACR
+          $preChartRef = "oci://${{ parameters.preRegistry }}/$(preChartRepository)"
+          Write-Host "Pushing Helm chart to: $preChartRef"
+          helm push $repackagedChart $preChartRef
+
+- stage: PushToPrivateRepo
+  displayName: 'Push scanned Helm chart to Private Repo'
+  dependsOn: PushToPreACR
+  condition: succeeded()
+  jobs:
+  - job: PullTagAndPush
+    displayName: 'Pull, Tag, and Push Helm Chart'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
+    variables:
+      scannedChartTag: '${{ parameters.sourceTag }}-snyk-scanned'
+      preChartRepository: 'scanned/${{ parameters.sourceRepository }}'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Pull from Pre and Push to Live ACR'
+      inputs:
+        azureSubscription: '${{ parameters.preRegistryServiceConnection }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry names
+          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          $liveRegistryName = "${{ parameters.destinationRegistry }}" -split '\.' | Select-Object -First 1
+          
+          # Create temp directory
+          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
+          
+          # Login to Pre ACR
+          az acr login --name $preRegistryName
+          
+          # Pull the scanned chart from Pre
+          $preChartRef = "oci://${{ parameters.preRegistry }}/$(preChartRepository)"
+          Write-Host "Pulling scanned Helm chart from: $preChartRef with tag $(scannedChartTag)"
+          helm pull $preChartRef --version $(scannedChartTag) --destination $chartDir.FullName
+          
+          # Get the downloaded chart file
+          $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
+          
+          # Login to Live ACR
+          az acr login --name $liveRegistryName
+          
+          # Extract and modify chart version back to original
+          $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage-live" -Force
+          tar -xzf $chartFile.FullName -C $extractDir.FullName
+          
+          $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
+          $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
+          $originalVersion = "${{ parameters.sourceTag }}"
+          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $originalVersion"
+          Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
+          
+          # Repackage with original version
+          $repackagedChart = helm package $chartName.FullName --destination $chartDir.FullName
+          
+          # Push to Live ACR
+          $liveChartRef = "oci://${{ parameters.destinationRegistry }}/${{ parameters.sourceRepository }}"
+          Write-Host "Pushing Helm chart to: $liveChartRef"
+          helm push $repackagedChart $liveChartRef
+
+    - task: PowerShell@2
+      displayName: 'Notify Success'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $body = @{
+            title = "Helm Chart Quarantine Success"
+            message = "Helm chart ${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} passed Snyk IaC scan and was pushed to live registry"
+            registry = "${{ parameters.destinationRegistry }}"
+            repository = "${{ parameters.sourceRepository }}"
+            tag = "${{ parameters.sourceTag }}"
+          } | ConvertTo-Json
+
+          Invoke-RestMethod -Method Post -Uri "${{ parameters.teamsWebhookEndpoint }}" -Body $body -ContentType 'application/json'
+
+- stage: AlertOnFail
+  displayName: 'Alert on Scan Failure'
+  dependsOn: 
+  - ScanHelmChart
+  - PushToPreACR
+  condition: failed()
+  jobs:
+  - job: PushVulnerableChart
+    displayName: 'Push Vulnerable Helm Chart to Pre'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
+    variables:
+      vulnerableChartTag: '${{ parameters.sourceTag }}-vulnerable'
+      vulnerableChartRepository: 'vulnerable/${{ parameters.sourceRepository }}'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Pull and Push Vulnerable Chart'
+      inputs:
+        azureSubscription: '${{ parameters.sourceRegistryServiceConnection }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry names
+          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
+          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          
+          # Create temp directory
+          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-vulnerable" -Force
+          
+          # Login to source ACR
+          az acr login --name $sourceRegistryName
+          
+          # Pull the Helm chart
+          $chartReference = "oci://${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
+          Write-Host "Pulling vulnerable Helm chart: $chartReference with tag ${{ parameters.sourceTag }}"
+          helm pull $chartReference --version ${{ parameters.sourceTag }} --destination $chartDir.FullName
+          
+          # Get the downloaded chart file
+          $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
+          
+          # Login to Pre ACR
+          az acr login --name $preRegistryName
+          
+          # Extract and modify version for vulnerable tag
+          $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage-vuln" -Force
+          tar -xzf $chartFile.FullName -C $extractDir.FullName
+          
+          $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
+          $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
+          $vulnVersion = "$(vulnerableChartTag)"
+          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $vulnVersion"
+          Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
+          
+          # Repackage with vulnerable version
+          $repackagedChart = helm package $chartName.FullName --destination $chartDir.FullName
+          
+          # Push to vulnerable path in Pre ACR
+          $vulnerableChartRef = "oci://${{ parameters.preRegistry }}/$(vulnerableChartRepository)"
+          Write-Host "Pushing vulnerable chart to: $vulnerableChartRef"
+          helm push $repackagedChart $vulnerableChartRef
+
+    - task: PowerShell@2
+      displayName: 'Notify Failure'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $body = @{
+            title = "Helm Chart Quarantine Failure"
+            message = "Helm chart ${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} failed Snyk IaC scan with high severity issues"
+            registry = "${{ parameters.preRegistry }}"
+            repository = "$(vulnerableChartRepository)"
+            tag = "$(vulnerableChartTag)"
+            severity = "HIGH"
+          } | ConvertTo-Json
+
+          Invoke-RestMethod -Method Post -Uri "${{ parameters.teamsWebhookEndpoint }}" -Body $body -ContentType 'application/json'
