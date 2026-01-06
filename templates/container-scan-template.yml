@@ -42,9 +42,18 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
+          # Check if tag is provided (Helm charts don't have tags)
+          $tag = "${{ parameters.sourceTag }}"
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            Write-Host "##[warning]No tag provided - likely a Helm chart, skipping container scan pipeline"
+            Write-Host "##vso[task.setvariable variable=isHelmChart;isOutput=true]true"
+            Write-Host "##vso[task.complete result=Skipped;]No tag provided - use helm pipeline instead"
+            exit 0
+          }
+          
           # Get manifest to check media type
           $registryName = "${{ parameters.sourceHost }}".Split('.')[0]
-          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} --registry $registryName --output json | ConvertFrom-Json
+          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }}:$tag --registry $registryName --output json | ConvertFrom-Json
           
           # Check if this is a Helm chart by looking at config media type
           $isHelmChart = $manifest.config.mediaType -eq "application/vnd.cncf.helm.config.v1+json"
