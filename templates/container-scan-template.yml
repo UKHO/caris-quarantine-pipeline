@@ -530,46 +530,31 @@ stages:
       preChartRepository: 'scanned/${{ parameters.sourceRepository }}'
     steps:
     - task: AzureCLI@2
-      displayName: 'Get Chart Version from Source ACR'
-      inputs:
-        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          # Extract registry name
-          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
-          
-          # Login to source ACR
-          az acr login --name $sourceRegistryName
-          
-          # Get the chart version from manifest (same method as Pre stage)
-          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
-          $chartVersion = $manifest.config.annotations.'org.opencontainers.image.version'
-          
-          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
-            Write-Host "##[warning]Could not determine chart version from manifest, using sourceTag parameter"
-            $chartVersion = "${{ parameters.sourceTag }}"
-          }
-          
-          Write-Host "Original chart version: $chartVersion"
-          $scannedVersion = "$chartVersion-snyk-scanned"
-          
-          Write-Host "##vso[task.setvariable variable=originalVersion;isOutput=true]$chartVersion"
-          Write-Host "##vso[task.setvariable variable=scannedVersion;isOutput=true]$scannedVersion"
-      name: getVersion
-    
-    - task: AzureCLI@2
       displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
       inputs:
         azureSubscription: '${{ parameters.preAzureSubscription }}'
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          # Get versions from previous task
-          $chartVersion = "$(getVersion.originalVersion)"
-          $scannedVersion = "$(getVersion.scannedVersion)"
+          # Extract registry name
+          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
           
-          Write-Host "Will pull scanned version from Pre: $scannedVersion"
+          # Login to Pre ACR
+          az acr login --name $preRegistryName
+          
+          # Get scanned chart version from Pre ACR manifest
+          $manifest = az acr manifest show --name $(preChartRepository) --registry $preRegistryName --output json | ConvertFrom-Json
+          $scannedVersion = $manifest.config.annotations.'org.opencontainers.image.version'
+          
+          if ([string]::IsNullOrWhiteSpace($scannedVersion)) {
+            Write-Host "##[error]Could not determine scanned chart version from Pre ACR"
+            exit 1
+          }
+          
+          # Strip -snyk-scanned suffix to get original version
+          $chartVersion = $scannedVersion -replace '-snyk-scanned$', ''
+          
+          Write-Host "Scanned version from Pre: $scannedVersion"
           Write-Host "Will repackage to original version: $chartVersion"
           
           # Create temp directory
