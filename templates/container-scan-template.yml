@@ -495,6 +495,9 @@ stages:
           
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
+          Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
+          Write-Host "##vso[task.setvariable variable=scannedChartVersion;isOutput=true]$newVersion"
+      name: pullChart
 
     - task: AzureCLI@2
       displayName: 'Push Helm Chart to Pre ACR'
@@ -530,6 +533,9 @@ stages:
     variables:
       # Helm appends chart name from Chart.yaml, so use parent path only
       preChartRepository: 'scanned/testcharts/testchart'
+      # Get versions from Pre stage output
+      originalVersion: $[ stageDependencies.PushHelmToPreACR.PushHelmToPre.outputs['pullChart.helmChartVersion'] ]
+      scannedVersion: $[ stageDependencies.PushHelmToPreACR.PushHelmToPre.outputs['pullChart.scannedChartVersion'] ]
     steps:
     - task: AzureCLI@2
       displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
@@ -538,27 +544,12 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          # Extract registry name
-          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          # Get versions from stage variables
+          $chartVersion = "$(originalVersion)"
+          $scannedVersion = "$(scannedVersion)"
           
-          # Login to Pre ACR
-          az acr login --name $preRegistryName
-          
-          # Get scanned chart version from Pre ACR by listing tags (most recent first)
-          $tags = az acr repository show-tags --name $preRegistryName --repository $(preChartRepository) --orderby time_desc --output json | ConvertFrom-Json
-          if ($tags -and $tags.Count -gt 0) {
-            $scannedVersion = $tags[0]
-            Write-Host "Found scanned chart version from Pre ACR: $scannedVersion"
-          } else {
-            Write-Host "##[error]No scanned charts found in Pre ACR repository: $(preChartRepository)"
-            exit 1
-          }
-          
-          # Strip -snyk-scanned suffix to get original version
-          $chartVersion = $scannedVersion -replace '-snyk-scanned$', ''
-          
+          Write-Host "Original version: $chartVersion"
           Write-Host "Scanned version from Pre: $scannedVersion"
-          Write-Host "Will repackage to original version: $chartVersion"
           
           # Create temp directory
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
