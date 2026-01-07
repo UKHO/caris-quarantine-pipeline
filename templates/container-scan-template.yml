@@ -27,6 +27,9 @@ parameters:
     type: string
   - name: sourceHost
     type: string
+  - name: enableHelmStages
+    type: boolean
+    default: true
 
 stages:
 - stage: ScanContainer
@@ -375,7 +378,7 @@ stages:
 - stage: ScanHelmChart
   displayName: 'Scan Helm Chart with Snyk IaC'
   dependsOn: ScanContainer
-  condition: and(in(dependencies.ScanContainer.result, 'Succeeded', 'SucceededWithIssues'), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'true'))
+  condition: and(${{ parameters.enableHelmStages }}, in(dependencies.ScanContainer.result, 'Succeeded', 'SucceededWithIssues'), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'true'))
   jobs:
   - job: HelmChartScan
     displayName: 'Scan Pushed Helm Chart'
@@ -436,7 +439,7 @@ stages:
 - stage: PushHelmToPreACR
   displayName: 'Push scanned Helm chart to Pre ACR'
   dependsOn: ScanHelmChart
-  condition: succeeded()
+  condition: and(${{ parameters.enableHelmStages }}, succeeded())
   jobs:
   - job: PushHelmToPre
     displayName: 'Push Helm Chart to Pre ACR'
@@ -537,7 +540,7 @@ stages:
 - stage: PushHelmToPrivateRepo
   displayName: 'Push scanned Helm chart to Live ACR'
   dependsOn: PushHelmToPreACR
-  condition: succeeded()
+  condition: and(${{ parameters.enableHelmStages }}, succeeded())
   jobs:
   - job: PullTagAndPushHelm
     displayName: 'Pull, Tag, and Push Helm Chart'
@@ -642,7 +645,7 @@ stages:
 - stage: AlertOnHelmSuccess
   displayName: 'Alert that Helm scan completed successfully'
   dependsOn: [PushHelmToPreACR, PushHelmToPrivateRepo]
-  condition: succeeded()
+  condition: and(${{ parameters.enableHelmStages }}, succeeded())
   jobs:
   - job: SendHelmSuccessTeamsMessage
     displayName: 'Send Helm Success Alert to Teams Channel'
@@ -669,7 +672,7 @@ stages:
 - stage: AlertOnHelmFail
   displayName: 'Alert that vulnerable Helm chart present'
   dependsOn: ScanHelmChart
-  condition: failed()
+  condition: and(${{ parameters.enableHelmStages }}, failed())
   jobs:
   - job: PushPreVulnerableHelmChart
     displayName: 'Push Vulnerable Helm Chart to Pre vulnerable namespace'
