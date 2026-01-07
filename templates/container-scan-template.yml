@@ -605,9 +605,18 @@ stages:
           # Extract registry name
           $liveRegistryName = "${{ parameters.destinationRegistry }}" -split '\.' | Select-Object -First 1
           
-          # Login to Live ACR
-          az acr login --name $liveRegistryName
-          
+          # Acquire an ACR access token that Helm can use
+          $accessToken = az acr login --name $liveRegistryName --expose-token --output tsv --query accessToken
+          if ([string]::IsNullOrWhiteSpace($accessToken)) {
+            Write-Host "##[error]Failed to obtain access token for Live ACR"
+            exit 1
+          }
+
+          # Login to Live ACR using Helm's registry auth (token is treated as password)
+          $helmRegistry = "${{ parameters.destinationRegistry }}"
+          Write-Host "Logging into Live ACR registry with Helm..."
+          $accessToken | helm registry login $helmRegistry --username 00000000-0000-0000-0000-000000000000 --password-stdin
+
           # Push to Live ACR (use base path without chart name, Helm will append it)
           $liveChartRef = "oci://${{ parameters.destinationRegistry }}/testcharts"
           $chartPath = "$(repackagedChartPath)"
