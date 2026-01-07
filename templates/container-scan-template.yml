@@ -542,12 +542,13 @@ stages:
           # Login to Pre ACR
           az acr login --name $preRegistryName
           
-          # Get scanned chart version from Pre ACR manifest
-          $manifest = az acr manifest show --name $(preChartRepository) --registry $preRegistryName --output json | ConvertFrom-Json
-          $scannedVersion = $manifest.config.annotations.'org.opencontainers.image.version'
-          
-          if ([string]::IsNullOrWhiteSpace($scannedVersion)) {
-            Write-Host "##[error]Could not determine scanned chart version from Pre ACR"
+          # Get scanned chart version from Pre ACR by listing tags (most recent first)
+          $tags = az acr repository show-tags --name $preRegistryName --repository $(preChartRepository) --orderby time_desc --output json | ConvertFrom-Json
+          if ($tags -and $tags.Count -gt 0) {
+            $scannedVersion = $tags[0]
+            Write-Host "Found scanned chart version from Pre ACR: $scannedVersion"
+          } else {
+            Write-Host "##[error]No scanned charts found in Pre ACR repository: $(preChartRepository)"
             exit 1
           }
           
