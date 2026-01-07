@@ -39,8 +39,31 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     steps:
+    - task: PowerShell@2
+      name: gateHelmEvent
+      displayName: 'Gate duplicate Helm webhook events'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $eventType = "$(resources.webhook.AcrWebhookTrigger.eventType)"
+          $action = "$(resources.webhook.AcrWebhookTrigger.action)"
+          Write-Host "Webhook eventType: $eventType"
+          Write-Host "Webhook action: $action"
+
+          $shouldSkip = 'false'
+          if (($eventType -and $eventType -like '*ChartCreated*') -or ($action -and $action -like '*chart.created*')) {
+            $shouldSkip = 'true'
+            Write-Host 'Initial Helm ChartCreated event detected; will skip this run and wait for ChartPushed.'
+          }
+
+          Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]$shouldSkip"
+          if ($shouldSkip -eq 'true') {
+            Write-Host 'Pipeline marked to skip; downstream steps will be bypassed.'
+          }
+
     - task: AzureCLI@2
       displayName: 'Detect Artifact Type (Container vs Helm Chart)'
+      condition: ne(variables['gateHelmEvent.skipPipeline'], 'true')
       inputs:
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         scriptType: 'pscore'
@@ -103,7 +126,7 @@ stages:
 - stage: PushToPreACR
   displayName: 'Push scanned image to Pre ACR'
   dependsOn: ScanContainer
-  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
+  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.gateHelmEvent.skipPipeline'], 'false'), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
   jobs:
   - job: PushToPre
     displayName: 'Push to Pre ACR'
@@ -152,7 +175,7 @@ stages:
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Private ACR'
   dependsOn: PushToPreACR
-  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
+  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.gateHelmEvent.skipPipeline'], 'false'), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
   jobs:
   - job: PullTagAndPush
     displayName: 'Pull, Tag and Push the image to the Private ACR'
@@ -201,7 +224,7 @@ stages:
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
   dependsOn: [PushToPreACR, PushToPrivateRepo]
-  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
+  condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.gateHelmEvent.skipPipeline'], 'false'), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
   jobs:
   - job: SendSuccessTeamsMessage
     displayName: 'Send Success Alert to Teams Channel'
@@ -233,7 +256,7 @@ stages:
 - stage: AlertOnFail
   displayName: 'Alert that vulnerable image present'
   dependsOn: ScanContainer
-  condition: and(failed(), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
+  condition: and(failed(), eq(dependencies.ScanContainer.outputs['ContainerScan.gateHelmEvent.skipPipeline'], 'false'), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
   jobs:
   - job: PushPreVulnerableImage
     displayName: 'Push Vulnerable Image to Pre vulnerable namespace'
@@ -360,7 +383,7 @@ stages:
 - stage: ScanHelmChart
   displayName: 'Scan Helm Chart with Snyk IaC'
   dependsOn: ScanContainer
-  condition: and(in(dependencies.ScanContainer.result, 'Succeeded', 'SucceededWithIssues'), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'true'))
+  condition: and(in(dependencies.ScanContainer.result, 'Succeeded', 'SucceededWithIssues'), eq(dependencies.ScanContainer.outputs['ContainerScan.gateHelmEvent.skipPipeline'], 'false'), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'true'))
   jobs:
   - job: HelmChartScan
     displayName: 'Scan Pushed Helm Chart'
