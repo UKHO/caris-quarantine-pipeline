@@ -608,8 +608,8 @@ stages:
           # Login to Live ACR
           az acr login --name $liveRegistryName
           
-          # Push to Live ACR
-          $liveChartRef = "oci://${{ parameters.destinationRegistry }}/${{ parameters.sourceRepository }}"
+          # Push to Live ACR (use base path without chart name, Helm will append it)
+          $liveChartRef = "oci://${{ parameters.destinationRegistry }}/testcharts"
           $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing Helm chart to: $liveChartRef"
           Write-Host "Chart file: $chartPath"
