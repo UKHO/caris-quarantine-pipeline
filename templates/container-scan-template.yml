@@ -46,28 +46,43 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          # Check if tag is provided (Helm charts don't have tags in webhook payload)
+          # Determine manifest reference (containers have tags, Helm charts typically do not)
           $tag = "${{ parameters.sourceTag }}"
-          if ([string]::IsNullOrWhiteSpace($tag)) {
-            Write-Host "##[warning]No tag provided - likely a Helm chart, will route to Helm scanning stages"
-            Write-Host "##vso[task.setvariable variable=isHelmChart;isOutput=true]true"
-            exit 0
-          }
-          
-          # Get manifest to check config media type
           $registryName = "${{ parameters.sourceHost }}".Split('.')[0]
-          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }}:$tag --registry $registryName --output json | ConvertFrom-Json
-          
-          # Check if this is a Helm chart by looking at config media type
-          # Helm charts have config.mediaType = "application/vnd.cncf.helm.config.v1+json"
-          $isHelmChart = $manifest.config.mediaType -eq "application/vnd.cncf.helm.config.v1+json"
-          
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            $manifestName = "${{ parameters.sourceRepository }}"
+          } else {
+            $manifestName = "${{ parameters.sourceRepository }}:$tag"
+          }
+
+          Write-Host "Inspecting manifest: $manifestName"
+
+          $manifest = $null
+          try {
+            $manifestJson = az acr manifest show --name $manifestName --registry $registryName --output json 2>$null
+            if (-not [string]::IsNullOrWhiteSpace($manifestJson)) {
+              $manifest = $manifestJson | ConvertFrom-Json
+            }
+          } catch {
+            Write-Host "##[warning]Unable to inspect manifest '$manifestName' in registry '$registryName'. Defaulting to container path."
+          }
+
+          $helmMediaType = "application/vnd.cncf.helm.config.v1+json"
+          $isHelmChart = $false
+          if ($manifest -and $manifest.config -and $manifest.config.mediaType -eq $helmMediaType) {
+            $isHelmChart = $true
+          }
+
           if ($isHelmChart) {
             Write-Host "✓ Detected Helm chart (config.mediaType: $($manifest.config.mediaType))"
             Write-Host "  → Will use Snyk IaC scanning for Helm chart"
             Write-Host "##vso[task.setvariable variable=isHelmChart;isOutput=true]true"
           } else {
-            Write-Host "✓ Detected container image (config.mediaType: $($manifest.config.mediaType))"
+            if ($manifest -and $manifest.config) {
+              Write-Host "✓ Detected container image (config.mediaType: $($manifest.config.mediaType))"
+            } else {
+              Write-Host "✓ Treating artifact as container image because manifest inspection failed."
+            }
             Write-Host "  → Will use Snyk container scanning"
             Write-Host "##vso[task.setvariable variable=isHelmChart;isOutput=true]false"
           }
