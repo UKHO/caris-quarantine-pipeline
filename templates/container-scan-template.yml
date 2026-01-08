@@ -462,6 +462,7 @@ stages:
     steps:
     - task: AzureCLI@2
       displayName: 'Pull Helm Chart from Source ACR'
+      name: pullChart
       inputs:
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         scriptType: 'pscore'
@@ -473,36 +474,31 @@ stages:
           # Login to source ACR
           az acr login --name $sourceRegistryName
           
-          # Get the chart version from manifest (same method as scan stage)
-          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
-          $chartVersion = $manifest.config.annotations.'org.opencontainers.image.version'
-          
-          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
-            Write-Host "##[warning]Could not determine chart version from manifest, using sourceTag parameter"
-            $chartVersion = "${{ parameters.sourceTag }}"
-          }
-          
-          Write-Host "Using chart version: $chartVersion"
-          Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
-          
           # Create temp directory
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-push" -Force
           
-          # Pull the Helm chart
+          # Pull the Helm chart (without version to get latest if no version)
           $chartReference = "oci://${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
-          Write-Host "Pulling Helm chart: $chartReference --version $chartVersion"
-          helm pull $chartReference --version $chartVersion --destination $chartDir.FullName
+          Write-Host "Pulling Helm chart: $chartReference"
+          helm pull $chartReference --destination $chartDir.FullName
           
           # Get the downloaded chart file
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
           
-          # Extract and modify version
+          # Extract to get version
           $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage" -Force
           tar -xzf $chartFile.FullName -C $extractDir.FullName
           
           $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
           $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
+          $versionMatch = [regex]::Match($chartYaml, 'version:\s*(.+)')
+          $chartVersion = $versionMatch.Groups[1].Value.Trim()
+          
+          Write-Host "Using chart version: $chartVersion"
+          Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
+          
           $newVersion = "$chartVersion-snyk-scanned"
+          Write-Host "##vso[task.setvariable variable=scannedChartVersion;isOutput=true]$newVersion"
           $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $newVersion"
           Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
           
