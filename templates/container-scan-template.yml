@@ -458,7 +458,7 @@ stages:
     variables:
       scannedChartTag: '$(helmChartVersion)-snyk-scanned'
       # Helm appends chart name from Chart.yaml, so use parent path only
-      preChartRepository: 'scanned/testcharts'
+      preChartRepository: 'scanned/charts'
     steps:
     - task: AzureCLI@2
       displayName: 'Pull Helm Chart from Source ACR'
@@ -553,7 +553,7 @@ stages:
       - ENVIRONMENT -equals BUS
     variables:
       # Helm appends chart name from Chart.yaml, so use parent path only
-      preChartRepository: 'scanned/testcharts/testchart'
+      preChartRepository: 'scanned/charts/${{ parameters.sourceRepository.split(''/'')[1] }}'
     steps:
     - task: AzureCLI@2
       displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
@@ -641,8 +641,7 @@ stages:
           Write-Host "Logging into Live ACR registry with Helm..."
           $accessToken | helm registry login $helmRegistry --username 00000000-0000-0000-0000-000000000000 --password-stdin
 
-          # Push to Live ACR (use base path without chart name, Helm will append it)
-          $liveChartRef = "oci://${{ parameters.destinationRegistry }}/testcharts"
+          $liveChartRef = "oci://${{ parameters.destinationRegistry }}/scanned/charts"
           $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing Helm chart to: $liveChartRef"
           Write-Host "Chart file: $chartPath"
