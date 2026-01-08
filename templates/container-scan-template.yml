@@ -254,7 +254,7 @@ stages:
   condition: and(failed(), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
   jobs:
   - job: PushPreVulnerableImage
-    displayName: 'Push Vulnerable Image to Pre vulnerable namespace'
+    displayName: 'Push Vulnerable Image to Pre ACR'
     pool:
       name: Tiberius
       demands:
@@ -298,7 +298,7 @@ stages:
         tags: '$(vulnerableImageTag)'
 
   - job: PushVulnerableImage
-    displayName: 'Push Vulnerable Image to vulnerable namespace'
+    displayName: 'Push Vulnerable Image to Live ACR'
     dependsOn: PushPreVulnerableImage
     pool:
       name: Tiberius
