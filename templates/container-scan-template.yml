@@ -553,7 +553,7 @@ stages:
       - ENVIRONMENT -equals BUS
     variables:
       # Helm appends chart name from Chart.yaml, so use parent path only
-      preChartRepository: 'scanned/charts/${{ parameters.sourceRepository.split(''/'')[1] }}'
+      preChartRepository: 'scanned/charts'
     steps:
     - task: AzureCLI@2
       displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
@@ -563,6 +563,8 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           # Create temp directory
+          $chartName = ${{ parameters.sourceRepository }} -split '/' | Select-Object -Last 1
+          $preChartRepository = "scanned/charts/$chartName"
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
           
           # Login to Pre ACR and pull scanned chart
@@ -570,12 +572,12 @@ stages:
           az acr login --name $preRegistryName
           
           # Get the latest tag for the chart
-          $tags = az acr repository show-tags --name $preRegistryName --repository $(preChartRepository) --output json | ConvertFrom-Json
+          $tags = az acr repository show-tags --name $preRegistryName --repository $preChartRepository --output json | ConvertFrom-Json
           $latestTag = ($tags | Sort-Object -Descending | Select-Object -First 1)
           
           Write-Host "Latest tag for chart: $latestTag"
           
-          $preChartRef = "oci://${{ parameters.preRegistry }}/$(preChartRepository)"
+          $preChartRef = "oci://${{ parameters.preRegistry }}/$preChartRepository"
           Write-Host "Pulling scanned Helm chart from: $preChartRef --version $latestTag"
           helm pull $preChartRef --version $latestTag --destination $chartDir.FullName
           
