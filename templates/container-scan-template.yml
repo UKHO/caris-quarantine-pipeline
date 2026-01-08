@@ -569,9 +569,15 @@ stages:
           $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
           az acr login --name $preRegistryName
           
+          # Get the latest tag for the chart
+          $tags = az acr repository show-tags --name $(preChartRepository) --registry $preRegistryName --output json | ConvertFrom-Json
+          $latestTag = ($tags | Sort-Object -Descending | Select-Object -First 1)
+          
+          Write-Host "Latest tag for chart: $latestTag"
+          
           $preChartRef = "oci://${{ parameters.preRegistry }}/$(preChartRepository)"
-          Write-Host "Pulling scanned Helm chart from: $preChartRef"
-          helm pull $preChartRef --destination $chartDir.FullName
+          Write-Host "Pulling scanned Helm chart from: $preChartRef --version $latestTag"
+          helm pull $preChartRef --version $latestTag --destination $chartDir.FullName
           
           # Get the downloaded chart file
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
