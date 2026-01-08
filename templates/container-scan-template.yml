@@ -570,7 +570,7 @@ stages:
           az acr login --name $preRegistryName
           
           # Get the latest tag for the chart
-          $tags = az acr repository show-tags --name $(preChartRepository) --registry $preRegistryName --output json | ConvertFrom-Json
+          $tags = az acr repository show-tags --name $preRegistryName --repository $(preChartRepository) --output json | ConvertFrom-Json
           $latestTag = ($tags | Sort-Object -Descending | Select-Object -First 1)
           
           Write-Host "Latest tag for chart: $latestTag"
