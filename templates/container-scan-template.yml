@@ -563,7 +563,7 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           # Create temp directory
-          $chartName = ${{ parameters.sourceRepository }} -split '/' | Select-Object -Last 1
+          $chartName = "${{ parameters.sourceRepository }}" -split '/' | Select-Object -Last 1
           $preChartRepository = "scanned/charts/$chartName"
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
           
