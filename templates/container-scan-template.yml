@@ -168,7 +168,7 @@ stages:
         tags: '$(scannedImageTag)'
 
 - stage: PushToPrivateRepo
-  displayName: 'Push passed image to Private ACR'
+  displayName: 'Push passed image to Live ACR'
   dependsOn: PushToPreACR
   condition: and(succeeded(), eq(dependencies.ScanContainer.outputs['ContainerScan.detectType.isHelmChart'], 'false'))
   jobs:
