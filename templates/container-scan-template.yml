@@ -27,6 +27,8 @@ parameters:
     type: string
   - name: sourceHost
     type: string
+  - name: mediaType
+    type: string
   - name: enableHelmStages
     type: boolean
     default: true
@@ -60,7 +62,7 @@ stages:
 
           Write-Host "Inspecting manifest: $manifestName"
 
-          $mediaType = "${{ parameters.AcrWebhookTrigger.target.mediaType }}"
+          $mediaType = "${{ parameters.mediaType }}"
           Write-Host "Webhook media type: $mediaType"
           $helmMediaType = "application/vnd.cncf.helm.config.v1+json"
           $isHelmChart = $false
