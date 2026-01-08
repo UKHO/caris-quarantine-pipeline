@@ -462,7 +462,6 @@ stages:
     steps:
     - task: AzureCLI@2
       displayName: 'Pull Helm Chart from Source ACR'
-      name: pullHelmChart
       inputs:
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         scriptType: 'pscore'
@@ -541,6 +540,10 @@ stages:
           Write-Host "Chart file: $chartPath"
           helm push $chartPath $preChartRef
 
+  outputs:
+    helmChartVersion: $(helmChartVersion)
+    scannedChartVersion: $(scannedChartVersion)
+
 - stage: PushHelmToPrivateRepo
   displayName: 'Push scanned Helm chart to Live ACR'
   dependsOn: PushHelmToPreACR
@@ -556,8 +559,8 @@ stages:
       # Helm appends chart name from Chart.yaml, so use parent path only
       preChartRepository: 'scanned/testcharts/testchart'
       # Get versions from Pre stage output
-      originalVersion: $[ stageDependencies.PushHelmToPreACR.PushHelmToPre.outputs['pullHelmChart.helmChartVersion'] ]
-      scannedVersion: $[ stageDependencies.PushHelmToPreACR.PushHelmToPre.outputs['pullHelmChart.scannedChartVersion'] ]
+      originalVersion: $[ stageDependencies.PushHelmToPreACR.PushHelmToPre.outputs.helmChartVersion ]
+      scannedVersion: $[ stageDependencies.PushHelmToPreACR.PushHelmToPre.outputs.scannedChartVersion ]
     steps:
     - task: AzureCLI@2
       displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
