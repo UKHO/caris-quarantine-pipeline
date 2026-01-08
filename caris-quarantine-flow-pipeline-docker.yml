@@ -7,7 +7,8 @@ resources:
       connection: AcrWebhookConnection
       filters:
         - path: target.mediaType
-          value: "application/vnd.docker.distribution.manifest.v2+json"
+          value: "application/vnd.docker.distribution.manifest.list.v2+json"
+                  
 
 variables:
   - group: caris-quarantine
