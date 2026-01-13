@@ -33,6 +33,74 @@ variables:
     value: 'caris-cloud'
 
 stages:
+- stage: DetectArtifact
+  displayName: 'Detect Artifact Type'
+  jobs:
+  - job: DetectArtifactJob
+    displayName: 'Determine Artifact Type'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
+    steps:
+    - task: AzureCLI@2
+      name: ClassifyArtifact
+      displayName: 'Inspect OCI Artifact'
+      inputs:
+        azureSubscription: '$(sourceAzureSubscription)'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          $tag = "${{ parameters.AcrWebhookTrigger.target.tag }}"
+          $repository = "${{ parameters.AcrWebhookTrigger.target.repository }}"
+          $registryHost = "${{ parameters.AcrWebhookTrigger.request.host }}"
+          $registryName = $registryHost.Split('.')[0]
+
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            $manifestName = $repository
+          } else {
+            $manifestName = "$repository:$tag"
+          }
+
+          Write-Host "Inspecting manifest: $manifestName"
+
+          $mediaType = "${{ parameters.AcrWebhookTrigger.target.mediaType }}"
+          Write-Host "Webhook media type: $mediaType"
+          $helmMediaType = "application/vnd.cncf.helm.config.v1+json"
+          $isHelmChart = $false
+          $manifest = $null
+
+          if ($mediaType -eq "application/vnd.oci.image.manifest.v1+json") {
+            $isHelmChart = $true
+          } else {
+            try {
+              $manifestJson = az acr manifest show --name $manifestName --registry $registryName --output json 2>$null
+              if (-not [string]::IsNullOrWhiteSpace($manifestJson)) {
+                $manifest = $manifestJson | ConvertFrom-Json
+              }
+            } catch {
+              Write-Host "##[warning]Unable to inspect manifest '$manifestName' in registry '$registryName'."
+            }
+
+            if ($manifest -and $manifest.config -and $manifest.config.mediaType -eq $helmMediaType) {
+              $isHelmChart = $true
+            }
+          }
+
+          if ($isHelmChart) {
+            Write-Host "✓ Detected Helm chart (mediaType: $mediaType)"
+            Write-Host "  → Will use Helm pipeline"
+            Write-Host "##vso[task.setvariable variable=isHelmChart;isOutput=true]true"
+          } else {
+            if ($manifest -and $manifest.config) {
+              Write-Host "✓ Detected container image (config.mediaType: $($manifest.config.mediaType))"
+            } else {
+              Write-Host "✓ Treating artifact as container image."
+            }
+            Write-Host "  → Will use container pipeline"
+            Write-Host "##vso[task.setvariable variable=isHelmChart;isOutput=true]false"
+          }
+
 - template: templates/container-scan-template.yml
   parameters:
     sourceAzureSubscription: '$(sourceAzureSubscription)'
@@ -49,5 +117,20 @@ stages:
     sourceRepository: ${{ parameters.AcrWebhookTrigger.target.repository }}
     sourceTag: ${{ parameters.AcrWebhookTrigger.target.tag }}
     sourceHost: ${{ parameters.AcrWebhookTrigger.request.host }}
-    mediaType: ${{ parameters.AcrWebhookTrigger.target.mediaType }}
-    enableHelmStages: true
+
+- template: templates/helm-scan-template.yml
+  parameters:
+    sourceAzureSubscription: '$(sourceAzureSubscription)'
+    preAzureSubscription: '$(preAzureSubscription)'
+    liveAzureSubscription: '$(liveAzureSubscription)'
+    sourceRegistryServiceConnection: '$(sourceRegistryServiceConnection)'
+    destinationRegistryServiceConnection: '$(destinationRegistryServiceConnection)'
+    preRegistryServiceConnection: '$(preRegistryServiceConnection)'
+    destinationRegistry: '$(destinationRegistry)'
+    preRegistry: '$(preRegistry)'
+    snykServiceConnection: '$(snykServiceConnection)'
+    snykOrganization: '$(snykOrganization)'
+    teamsWebhookEndpoint: '$(teamsWebhookEndpoint)'
+    sourceRepository: ${{ parameters.AcrWebhookTrigger.target.repository }}
+    sourceTag: ${{ parameters.AcrWebhookTrigger.target.tag }}
+    sourceHost: ${{ parameters.AcrWebhookTrigger.request.host }}

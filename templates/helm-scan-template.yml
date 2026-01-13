@@ -1,0 +1,439 @@
+parameters:
+  - name: sourceAzureSubscription
+    type: string
+  - name: preAzureSubscription
+    type: string
+  - name: liveAzureSubscription
+    type: string
+  - name: sourceRegistryServiceConnection
+    type: string
+  - name: destinationRegistryServiceConnection
+    type: string
+  - name: preRegistryServiceConnection
+    type: string
+  - name: destinationRegistry
+    type: string
+  - name: preRegistry
+    type: string
+  - name: snykServiceConnection
+    type: string
+  - name: snykOrganization
+    type: string
+  - name: teamsWebhookEndpoint
+    type: string
+  - name: sourceRepository
+    type: string
+  - name: sourceTag
+    type: string
+  - name: sourceHost
+    type: string
+
+stages:
+- stage: ScanHelmChart
+  displayName: 'Scan Helm Chart with Snyk IaC'
+  dependsOn: DetectArtifact
+  condition: and(succeeded('DetectArtifact'), eq(dependencies.DetectArtifact.outputs['DetectArtifactJob.ClassifyArtifact.isHelmChart'], 'true'))
+  jobs:
+  - job: HelmChartScan
+    displayName: 'Scan Pushed Helm Chart'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Login to ACR and Pull Helm Chart'
+      inputs:
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name from host
+          $registryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
+          
+          # Login to ACR
+          az acr login --name $registryName
+          
+          # Get the chart version from manifest (Helm charts don't have sourceTag in webhook)
+          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $registryName --output json | ConvertFrom-Json
+          $chartVersion = $manifest.config.annotations.'org.opencontainers.image.version'
+          
+          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
+            Write-Host "##[warning]Could not determine chart version from manifest, using sourceTag parameter"
+            $chartVersion = "${{ parameters.sourceTag }}"
+          }
+          
+          Write-Host "Helm chart version: $chartVersion"
+          Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
+          
+          # Create temp directory for chart
+          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts" -Force
+          
+          # Pull the Helm chart
+          $chartReference = "oci://${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
+          Write-Host "Pulling Helm chart: $chartReference --version $chartVersion"
+          helm pull $chartReference --version $chartVersion --destination $chartDir.FullName --untar
+          
+          # Set variable for extracted chart path
+          $extractedChart = Get-ChildItem -Path $chartDir.FullName -Directory | Select-Object -First 1
+          Write-Host "##vso[task.setvariable variable=helmChartPath]$($extractedChart.FullName)"
+          Write-Host "Helm chart extracted to: $($extractedChart.FullName)"
+
+    - task: UkhoSnykScanTask@0
+      displayName: 'Snyk IaC scan for Helm Chart'
+      inputs:
+        failOnIssues: true
+        organization: '${{ parameters.snykOrganization }}'
+        serviceConnectionEndpoint: '${{ parameters.snykServiceConnection }}'
+        testType: iac
+        monitorWhen: always
+        severityThreshold: high
+        targetFile: '$(helmChartPath)'
+
+- stage: PushHelmToPreACR
+  displayName: 'Push scanned Helm chart to Pre ACR'
+  dependsOn: ScanHelmChart
+  condition: succeeded('ScanHelmChart')
+  jobs:
+  - job: PushHelmToPre
+    displayName: 'Push Helm Chart to Pre ACR'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
+    variables:
+      scannedChartTag: '$(helmChartVersion)-snyk-scanned'
+      # Helm appends chart name from Chart.yaml, so use parent path only
+      preChartRepository: 'scanned/charts'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Pull Helm Chart from Source ACR'
+      inputs:
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name
+          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
+          
+          # Login to source ACR
+          az acr login --name $sourceRegistryName
+          
+          # Create temp directory
+          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-push" -Force
+          
+          # Pull the Helm chart (without version to get latest if no version)
+          $chartReference = "oci://${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
+          Write-Host "Pulling Helm chart: $chartReference"
+          helm pull $chartReference --destination $chartDir.FullName
+          
+          # Get the downloaded chart file
+          $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
+          
+          # Extract to get version
+          $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage" -Force
+          tar -xzf $chartFile.FullName -C $extractDir.FullName
+          
+          $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
+          $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
+          $versionMatch = [regex]::Match($chartYaml, 'version:\s*(.+)')
+          $chartVersion = $versionMatch.Groups[1].Value.Trim()
+          
+          Write-Host "Using chart version: $chartVersion"
+          Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
+          
+          $newVersion = "$chartVersion-snyk-scanned"
+          Write-Host "##vso[task.setvariable variable=scannedChartVersion;isOutput=true]$newVersion"
+          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $newVersion"
+          Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
+          
+          # Repackage with new version
+          $packageOutput = helm package $chartName.FullName --destination $chartDir.FullName
+          Write-Host $packageOutput
+          
+          # Extract the actual file path from helm package output
+          # Output format: "Successfully packaged chart and saved it to: /path/to/chart.tgz"
+          if ($packageOutput -match ':\s+(.+\.tgz)$') {
+            $repackagedChart = $matches[1]
+          } else {
+            # Fallback: find the .tgz file
+            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$newVersion.tgz" | Select-Object -First 1).FullName
+          }
+          
+          Write-Host "Repackaged chart path: $repackagedChart"
+          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
+          Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
+          Write-Host "##vso[task.setvariable variable=scannedChartVersion;isOutput=true]$newVersion"
+      name: pullChart
+
+    - task: AzureCLI@2
+      displayName: 'Push Helm Chart to Pre ACR'
+      inputs:
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name
+          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          
+          # Login to Pre ACR
+          az acr login --name $preRegistryName
+          
+          # Push to Pre ACR
+          $preChartRef = "oci://${{ parameters.preRegistry }}/$(preChartRepository)"
+          $chartPath = "$(repackagedChartPath)"
+          Write-Host "Pushing Helm chart to: $preChartRef"
+          Write-Host "Chart file: $chartPath"
+          helm push $chartPath $preChartRef
+
+- stage: PushHelmToPrivateRepo
+  displayName: 'Push scanned Helm chart to Live ACR'
+  dependsOn: PushHelmToPreACR
+  condition: succeeded('PushHelmToPreACR')
+  jobs:
+  - job: PullTagAndPushHelm
+    displayName: 'Pull, Tag, and Push Helm Chart'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
+    variables:
+      # Helm appends chart name from Chart.yaml, so use parent path only
+      preChartRepository: 'scanned/charts'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
+      inputs:
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Create temp directory
+          $chartName = "${{ parameters.sourceRepository }}" -split '/' | Select-Object -Last 1
+          $preChartRepository = "scanned/charts/$chartName"
+          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
+          
+          # Login to Pre ACR and pull scanned chart
+          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          az acr login --name $preRegistryName
+          
+          # Get the latest tag for the chart
+          $tags = az acr repository show-tags --name $preRegistryName --repository $preChartRepository --output json | ConvertFrom-Json
+          $latestTag = ($tags | Sort-Object -Descending | Select-Object -First 1)
+          
+          Write-Host "Latest tag for chart: $latestTag"
+          
+          $preChartRef = "oci://${{ parameters.preRegistry }}/$preChartRepository"
+          Write-Host "Pulling scanned Helm chart from: $preChartRef --version $latestTag"
+          helm pull $preChartRef --version $latestTag --destination $chartDir.FullName
+          
+          # Get the downloaded chart file
+          $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
+          
+          if (-not $chartFile) {
+            Write-Host "##[error]Failed to pull chart from Pre ACR."
+            exit 1
+          }
+          
+          # Extract to get version
+          $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage-live" -Force
+          tar -xzf $chartFile.FullName -C $extractDir.FullName
+          
+          $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
+          $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
+          $versionMatch = [regex]::Match($chartYaml, 'version:\s*(.+)')
+          $scannedVersion = $versionMatch.Groups[1].Value.Trim()
+          $originalVersion = $scannedVersion -replace '-snyk-scanned', ''
+          
+          Write-Host "Parsed scanned version: $scannedVersion"
+          Write-Host "Parsed original version: $originalVersion"
+          
+          # Modify chart version back to original
+          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $originalVersion"
+          Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
+          
+          # Repackage with original version
+          $packageOutput = helm package $chartName.FullName --destination $chartDir.FullName
+          Write-Host $packageOutput
+          
+          # Extract the actual file path from helm package output
+          if ($packageOutput -match ':\s+(.+\.tgz)$') {
+            $repackagedChart = $matches[1]
+          } else {
+            # Fallback: find the .tgz file
+            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$originalVersion.tgz" | Select-Object -First 1).FullName
+          }
+          
+          Write-Host "Repackaged chart path: $repackagedChart"
+          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
+
+    - task: AzureCLI@2
+      displayName: 'Push Helm Chart to Live ACR'
+      inputs:
+        azureSubscription: '${{ parameters.liveAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name
+          $liveRegistryName = "${{ parameters.destinationRegistry }}" -split '\.' | Select-Object -First 1
+          
+          # Acquire an ACR access token that Helm can use
+          $accessToken = az acr login --name $liveRegistryName --expose-token --output tsv --query accessToken
+          if ([string]::IsNullOrWhiteSpace($accessToken)) {
+            Write-Host "##[error]Failed to obtain access token for Live ACR"
+            exit 1
+          }
+
+          # Login to Live ACR using Helm's registry auth (token is treated as password)
+          $helmRegistry = "${{ parameters.destinationRegistry }}"
+          Write-Host "Logging into Live ACR registry with Helm..."
+          $accessToken | helm registry login $helmRegistry --username 00000000-0000-0000-0000-000000000000 --password-stdin
+
+          $liveChartRef = "oci://${{ parameters.destinationRegistry }}/scanned/charts"
+          $chartPath = "$(repackagedChartPath)"
+          Write-Host "Pushing Helm chart to: $liveChartRef"
+          Write-Host "Chart file: $chartPath"
+          helm push $chartPath $liveChartRef
+
+- stage: AlertOnHelmSuccess
+  displayName: 'Alert that Helm scan completed successfully'
+  dependsOn: [PushHelmToPreACR, PushHelmToPrivateRepo]
+  condition: and(succeeded('PushHelmToPreACR'), succeeded('PushHelmToPrivateRepo'))
+  jobs:
+  - job: SendHelmSuccessTeamsMessage
+    displayName: 'Send Helm Success Alert to Teams Channel'
+    pool: Mare Nectaris
+    steps:
+    - task: PowerShell@2
+      displayName: 'Send Teams Alert'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $body = @{
+            title = "Helm Chart Scan Completed Successfully"
+            message = "Helm chart scanning passed and chart has been pushed to live and pre private registries."
+            status = "success"
+            sourceHost = "${{ parameters.sourceHost }}"
+            sourceRepository = "${{ parameters.sourceRepository }}"
+            destinationRegistry = "${{ parameters.destinationRegistry }}"
+            preRegistry = "${{ parameters.preRegistry }}"
+            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          } | ConvertTo-Json
+          
+          Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
+
+- stage: AlertOnHelmFail
+  displayName: 'Alert that vulnerable Helm chart present'
+  dependsOn: ScanHelmChart
+  condition: failed('ScanHelmChart')
+  jobs:
+  - job: PushPreVulnerableHelmChart
+    displayName: 'Push Vulnerable Helm Chart to Pre vulnerable namespace'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
+    variables:
+      vulnerableChartRepository: 'vulnerable/${{ parameters.sourceRepository }}'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Pull and Repackage Vulnerable Chart'
+      inputs:
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name
+          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
+          
+          # Login to source ACR
+          az acr login --name $sourceRegistryName
+          
+          # Get chart version
+          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
+          $chartVersion = $manifest.config.annotations.'org.opencontainers.image.version'
+          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
+            $chartVersion = "${{ parameters.sourceTag }}"
+          }
+          Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
+          $vulnerableVersion = "$chartVersion-vulnerable"
+          Write-Host "##vso[task.setvariable variable=vulnerableChartTag]$vulnerableVersion"
+          
+          # Create temp directory
+          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-vulnerable" -Force
+          
+          # Pull the Helm chart
+          $chartReference = "oci://${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
+          Write-Host "Pulling vulnerable Helm chart: $chartReference --version $chartVersion"
+          helm pull $chartReference --version $chartVersion --destination $chartDir.FullName
+          
+          # Get the downloaded chart file
+          $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
+          
+          # Extract and modify version for vulnerable tag
+          $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage-vuln" -Force
+          tar -xzf $chartFile.FullName -C $extractDir.FullName
+          
+          $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
+          $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
+          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $vulnerableVersion"
+          Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
+          
+          # Repackage with vulnerable version
+          $packageOutput = helm package $chartName.FullName --destination $chartDir.FullName
+          Write-Host $packageOutput
+          
+          # Extract the actual file path from helm package output
+          if ($packageOutput -match ':\s+(.+\.tgz)$') {
+            $repackagedChart = $matches[1]
+          } else {
+            # Fallback: find the .tgz file
+            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$vulnerableVersion.tgz" | Select-Object -First 1).FullName
+          }
+          
+          Write-Host "Repackaged chart path: $repackagedChart"
+          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
+
+    - task: AzureCLI@2
+      displayName: 'Push Vulnerable Chart to Pre ACR'
+      inputs:
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Extract registry name
+          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          
+          # Login to Pre ACR
+          az acr login --name $preRegistryName
+          
+          # Push to vulnerable path in Pre ACR
+          $vulnerableChartRef = "oci://${{ parameters.preRegistry }}/$(vulnerableChartRepository)"
+          $chartPath = "$(repackagedChartPath)"
+          Write-Host "Pushing vulnerable chart to: $vulnerableChartRef"
+          Write-Host "Chart file: $chartPath"
+          helm push $chartPath $vulnerableChartRef
+
+  - job: SendHelmFailureTeamsMessage
+    displayName: 'Send Helm Failure Alert to Teams Channel'
+    dependsOn: PushPreVulnerableHelmChart
+    condition: always()
+    pool: Mare Nectaris
+    steps:
+    - task: PowerShell@2
+      displayName: 'Send Teams Alert'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $body = @{
+            title = "Helm Chart Scan Failed"
+            message = "Helm chart scanning failed due to vulnerabilities detected in chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}. Vulnerable chart pushed to pre registry."
+            status = "failure"
+            sourceHost = "${{ parameters.sourceHost }}"
+            sourceRepository = "${{ parameters.sourceRepository }}"
+            preRegistry = "${{ parameters.preRegistry }}"
+            vulnerableRepository = "vulnerable/${{ parameters.sourceRepository }}"
+            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+          } | ConvertTo-Json
+          
+          Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
