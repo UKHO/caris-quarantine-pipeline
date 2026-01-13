@@ -70,21 +70,20 @@ stages:
           $isHelmChart = $false
           $manifest = $null
 
-          if ($mediaType -eq "application/vnd.oci.image.manifest.v1+json") {
-            $isHelmChart = $true
-          } else {
-            try {
-              $manifestJson = az acr manifest show --name $manifestName --registry $registryName --output json 2>$null
-              if (-not [string]::IsNullOrWhiteSpace($manifestJson)) {
-                $manifest = $manifestJson | ConvertFrom-Json
-              }
-            } catch {
-              Write-Host "##[warning]Unable to inspect manifest '$manifestName' in registry '$registryName'."
+          try {
+            $manifestJson = az acr manifest show --name $manifestName --registry $registryName --output json 2>$null
+            if (-not [string]::IsNullOrWhiteSpace($manifestJson)) {
+              $manifest = $manifestJson | ConvertFrom-Json
             }
+          } catch {
+            Write-Host "##[warning]Unable to inspect manifest '$manifestName' in registry '$registryName'."
+          }
 
-            if ($manifest -and $manifest.config -and $manifest.config.mediaType -eq $helmMediaType) {
-              $isHelmChart = $true
-            }
+          if ($manifest -and $manifest.config -and $manifest.config.mediaType -eq $helmMediaType) {
+            $isHelmChart = $true
+          } elseif ($mediaType -eq $helmMediaType) {
+            # Fallback: trust webhook media type only when it matches Helm config media type
+            $isHelmChart = $true
           }
 
           if ($isHelmChart) {
