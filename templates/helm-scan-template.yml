@@ -31,8 +31,7 @@ parameters:
 stages:
 - stage: ScanHelmChart
   displayName: 'Scan Helm Chart with Snyk IaC'
-  dependsOn: DetectArtifact
-  condition: and(succeeded('DetectArtifact'), eq(dependencies.DetectArtifact.outputs['DetectArtifactJob.ClassifyArtifact.isHelmChart'], 'true'))
+  condition: succeeded()
   jobs:
   - job: HelmChartScan
     displayName: 'Scan Pushed Helm Chart'

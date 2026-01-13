@@ -31,8 +31,7 @@ parameters:
 stages:
 - stage: ScanContainer
   displayName: 'Scan Container'
-  dependsOn: DetectArtifact
-  condition: and(succeeded('DetectArtifact'), eq(dependencies.DetectArtifact.outputs['DetectArtifactJob.ClassifyArtifact.isHelmChart'], 'false'))
+  condition: succeeded()
   jobs:
   - job: ContainerScan
     displayName: 'Scan Pushed Image'
