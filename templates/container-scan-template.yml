@@ -1,10 +1,4 @@
 parameters:
-  - name: sourceAzureSubscription
-    type: string
-  - name: preAzureSubscription
-    type: string
-  - name: liveAzureSubscription
-    type: string
   - name: sourceRegistryServiceConnection
     type: string
   - name: destinationRegistryServiceConnection

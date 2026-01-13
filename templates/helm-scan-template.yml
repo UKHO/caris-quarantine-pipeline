@@ -47,11 +47,9 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          # Extract registry name from host
-          $registryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
-          
-          # Login to ACR
-          az acr login --name $registryName
+          # Extract registry info
+          $registryHost = "${{ parameters.sourceHost }}"
+          $registryName = $registryHost -split '\.' | Select-Object -First 1
           
           # Get the chart version from manifest (Helm charts don't have sourceTag in webhook)
           $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $registryName --output json | ConvertFrom-Json
@@ -65,13 +63,24 @@ stages:
           Write-Host "Helm chart version: $chartVersion"
           Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
           
+          $accessToken = az acr login --name $registryName --expose-token --output tsv --query accessToken
+          if ([string]::IsNullOrWhiteSpace($accessToken)) {
+            Write-Host "##[error]Failed to obtain registry token for $registryHost"
+            exit 1
+          }
+          
           # Create temp directory for chart
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts" -Force
           
           # Pull the Helm chart
-          $chartReference = "oci://${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
+          $chartReference = "oci://$registryHost/${{ parameters.sourceRepository }}"
           Write-Host "Pulling Helm chart: $chartReference --version $chartVersion"
-          helm pull $chartReference --version $chartVersion --destination $chartDir.FullName --untar
+          try {
+            $accessToken | helm registry login $registryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
+            helm pull $chartReference --version $chartVersion --destination $chartDir.FullName --untar
+          } finally {
+            helm registry logout $registryHost | Out-Null
+          }
           
           # Set variable for extracted chart path
           $extractedChart = Get-ChildItem -Path $chartDir.FullName -Directory | Select-Object -First 1
@@ -113,31 +122,47 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           # Extract registry name
-          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
+          $sourceRegistryHost = "${{ parameters.sourceHost }}"
+          $sourceRegistryName = $sourceRegistryHost -split '\.' | Select-Object -First 1
           
-          # Login to source ACR
-          az acr login --name $sourceRegistryName
-          
-          # Create temp directory
+          $accessToken = az acr login --name $sourceRegistryName --expose-token --output tsv --query accessToken
+          if ([string]::IsNullOrWhiteSpace($accessToken)) {
+            Write-Host "##[error]Failed to obtain registry token for $sourceRegistryHost"
+            exit 1
+          }
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-push" -Force
           
           # Pull the Helm chart (without version to get latest if no version)
-          $chartReference = "oci://${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
+          $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
           Write-Host "Pulling Helm chart: $chartReference"
-          helm pull $chartReference --destination $chartDir.FullName
-          
-          # Get the downloaded chart file
+          try {
+            $accessToken | helm registry login $sourceRegistryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
+            helm pull $chartReference --destination $chartDir.FullName
+          } finally {
+            helm registry logout $sourceRegistryHost | Out-Null
+          }
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
+          if (-not $chartFile) {
+            Write-Host "##[error]Unable to locate pulled chart artifact"
+            exit 1
+          }
           
           # Extract to get version
           $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage" -Force
           tar -xzf $chartFile.FullName -C $extractDir.FullName
           
           $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
+          if (-not $chartName) {
+            Write-Host "##[error]Unable to identify chart directory after extraction"
+            exit 1
+          }
           $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
           $versionMatch = [regex]::Match($chartYaml, 'version:\s*(.+)')
+          if (-not $versionMatch.Success) {
+            Write-Host "##[error]Unable to detect chart version"
+            exit 1
+          }
           $chartVersion = $versionMatch.Groups[1].Value.Trim()
-          
           Write-Host "Using chart version: $chartVersion"
           Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
           
@@ -151,7 +176,6 @@ stages:
           Write-Host $packageOutput
           
           # Extract the actual file path from helm package output
-          # Output format: "Successfully packaged chart and saved it to: /path/to/chart.tgz"
           if ($packageOutput -match ':\s+(.+\.tgz)$') {
             $repackagedChart = $matches[1]
           } else {
@@ -159,10 +183,12 @@ stages:
             $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$newVersion.tgz" | Select-Object -First 1).FullName
           }
           
+          if (-not $repackagedChart) {
+            Write-Host "##[error]Unable to locate repackaged chart"
+            exit 1
+          }
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
-          Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
-          Write-Host "##vso[task.setvariable variable=scannedChartVersion;isOutput=true]$newVersion"
       name: pullChart
 
     - task: AzureCLI@2
@@ -173,17 +199,26 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           # Extract registry name
-          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          $preRegistryHost = "${{ parameters.preRegistry }}"
+          $preRegistryName = $preRegistryHost -split '\.' | Select-Object -First 1
           
-          # Login to Pre ACR
-          az acr login --name $preRegistryName
+          $accessToken = az acr login --name $preRegistryName --expose-token --output tsv --query accessToken
+          if ([string]::IsNullOrWhiteSpace($accessToken)) {
+            Write-Host "##[error]Failed to obtain registry token for $preRegistryHost"
+            exit 1
+          }
           
           # Push to Pre ACR
-          $preChartRef = "oci://${{ parameters.preRegistry }}/$(preChartRepository)"
+          $preChartRef = "oci://$preRegistryHost/$(preChartRepository)"
           $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing Helm chart to: $preChartRef"
           Write-Host "Chart file: $chartPath"
-          helm push $chartPath $preChartRef
+          try {
+            $accessToken | helm registry login $preRegistryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
+            helm push $chartPath $preChartRef
+          } finally {
+            helm registry logout $preRegistryHost | Out-Null
+          }
 
 - stage: PushHelmToPrivateRepo
   displayName: 'Push scanned Helm chart to Live ACR'
@@ -213,8 +248,13 @@ stages:
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
           
           # Login to Pre ACR and pull scanned chart
-          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
-          az acr login --name $preRegistryName
+          $preRegistryHost = "${{ parameters.preRegistry }}"
+          $preRegistryName = $preRegistryHost -split '\.' | Select-Object -First 1
+          $accessToken = az acr login --name $preRegistryName --expose-token --output tsv --query accessToken
+          if ([string]::IsNullOrWhiteSpace($accessToken)) {
+            Write-Host "##[error]Failed to obtain registry token for $preRegistryHost"
+            exit 1
+          }
           
           # Get the latest tag for the chart
           $tags = az acr repository show-tags --name $preRegistryName --repository $preChartRepository --output json | ConvertFrom-Json
@@ -222,9 +262,14 @@ stages:
           
           Write-Host "Latest tag for chart: $latestTag"
           
-          $preChartRef = "oci://${{ parameters.preRegistry }}/$preChartRepository"
+          $preChartRef = "oci://$preRegistryHost/$preChartRepository"
           Write-Host "Pulling scanned Helm chart from: $preChartRef --version $latestTag"
-          helm pull $preChartRef --version $latestTag --destination $chartDir.FullName
+          try {
+            $accessToken | helm registry login $preRegistryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
+            helm pull $preChartRef --version $latestTag --destination $chartDir.FullName
+          } finally {
+            helm registry logout $preRegistryHost | Out-Null
+          }
           
           # Get the downloaded chart file
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
@@ -274,7 +319,8 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           # Extract registry name
-          $liveRegistryName = "${{ parameters.destinationRegistry }}" -split '\.' | Select-Object -First 1
+          $liveRegistryHost = "${{ parameters.destinationRegistry }}"
+          $liveRegistryName = $liveRegistryHost -split '\.' | Select-Object -First 1
           
           # Acquire an ACR access token that Helm can use
           $accessToken = az acr login --name $liveRegistryName --expose-token --output tsv --query accessToken
@@ -284,15 +330,18 @@ stages:
           }
 
           # Login to Live ACR using Helm's registry auth (token is treated as password)
-          $helmRegistry = "${{ parameters.destinationRegistry }}"
-          Write-Host "Logging into Live ACR registry with Helm..."
-          $accessToken | helm registry login $helmRegistry --username 00000000-0000-0000-0000-000000000000 --password-stdin
-
-          $liveChartRef = "oci://${{ parameters.destinationRegistry }}/scanned/charts"
+          $helmRegistry = $liveRegistryHost
+          $liveChartRef = "oci://$liveRegistryHost/scanned/charts"
           $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing Helm chart to: $liveChartRef"
           Write-Host "Chart file: $chartPath"
-          helm push $chartPath $liveChartRef
+          try {
+            Write-Host "Logging into Live ACR registry with Helm..."
+            $accessToken | helm registry login $helmRegistry --username 00000000-0000-0000-0000-000000000000 --password-stdin
+            helm push $chartPath $liveChartRef
+          } finally {
+            helm registry logout $helmRegistry | Out-Null
+          }
 
 - stage: AlertOnHelmSuccess
   displayName: 'Alert that Helm scan completed successfully'
@@ -343,10 +392,14 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           # Extract registry name
-          $sourceRegistryName = "${{ parameters.sourceHost }}" -split '\.' | Select-Object -First 1
+          $sourceRegistryHost = "${{ parameters.sourceHost }}"
+          $sourceRegistryName = $sourceRegistryHost -split '\.' | Select-Object -First 1
           
-          # Login to source ACR
-          az acr login --name $sourceRegistryName
+          $accessToken = az acr login --name $sourceRegistryName --expose-token --output tsv --query accessToken
+          if ([string]::IsNullOrWhiteSpace($accessToken)) {
+            Write-Host "##[error]Failed to obtain registry token for $sourceRegistryHost"
+            exit 1
+          }
           
           # Get chart version
           $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
@@ -362,9 +415,14 @@ stages:
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-vulnerable" -Force
           
           # Pull the Helm chart
-          $chartReference = "oci://${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}"
+          $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
           Write-Host "Pulling vulnerable Helm chart: $chartReference --version $chartVersion"
-          helm pull $chartReference --version $chartVersion --destination $chartDir.FullName
+          try {
+            $accessToken | helm registry login $sourceRegistryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
+            helm pull $chartReference --version $chartVersion --destination $chartDir.FullName
+          } finally {
+            helm registry logout $sourceRegistryHost | Out-Null
+          }
           
           # Get the downloaded chart file
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
@@ -401,17 +459,26 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           # Extract registry name
-          $preRegistryName = "${{ parameters.preRegistry }}" -split '\.' | Select-Object -First 1
+          $preRegistryHost = "${{ parameters.preRegistry }}"
+          $preRegistryName = $preRegistryHost -split '\.' | Select-Object -First 1
           
-          # Login to Pre ACR
-          az acr login --name $preRegistryName
+          $accessToken = az acr login --name $preRegistryName --expose-token --output tsv --query accessToken
+          if ([string]::IsNullOrWhiteSpace($accessToken)) {
+            Write-Host "##[error]Failed to obtain registry token for $preRegistryHost"
+            exit 1
+          }
           
           # Push to vulnerable path in Pre ACR
-          $vulnerableChartRef = "oci://${{ parameters.preRegistry }}/$(vulnerableChartRepository)"
+          $vulnerableChartRef = "oci://$preRegistryHost/$(vulnerableChartRepository)"
           $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing vulnerable chart to: $vulnerableChartRef"
           Write-Host "Chart file: $chartPath"
-          helm push $chartPath $vulnerableChartRef
+          try {
+            $accessToken | helm registry login $preRegistryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
+            helm push $chartPath $vulnerableChartRef
+          } finally {
+            helm registry logout $preRegistryHost | Out-Null
+          }
 
   - job: SendHelmFailureTeamsMessage
     displayName: 'Send Helm Failure Alert to Teams Channel'
