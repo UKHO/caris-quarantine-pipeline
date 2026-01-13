@@ -59,7 +59,7 @@ stages:
           if ([string]::IsNullOrWhiteSpace($tag)) {
             $manifestName = $repository
           } else {
-            $manifestName = "$repository:$tag"
+            $manifestName = "${repository}:${tag}"
           }
 
           Write-Host "Inspecting manifest: $manifestName"
