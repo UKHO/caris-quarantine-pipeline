@@ -10,6 +10,26 @@ function Get-HelmChartVersionFromManifest {
         [string]$FallbackTag
     )
 
+    function Invoke-AzCli {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)]
+            [string[]]$Arguments
+        )
+
+        $output = & az @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            $message = ($output | Out-String).Trim()
+            if ([string]::IsNullOrWhiteSpace($message)) {
+                $message = "az exited with code $exitCode"
+            }
+            throw $message
+        }
+
+        return ($output | Out-String).Trim()
+    }
+
     function Get-ObjectPropertyValue {
         param(
             [Parameter(Mandatory)]
@@ -33,9 +53,12 @@ function Get-HelmChartVersionFromManifest {
 
     function Get-ChartVersionFromManifestObject {
         param(
-            [Parameter(Mandatory)]
             $ManifestObject
         )
+
+        if ($null -eq $ManifestObject) {
+            return $null
+        }
 
         $versionKey = 'org.opencontainers.image.version'
 
@@ -64,15 +87,53 @@ function Get-HelmChartVersionFromManifest {
 
     $tagToUse = $FallbackTag
     if ([string]::IsNullOrWhiteSpace($tagToUse)) {
-        $tagToUse = az acr repository show-tags --name $RegistryName --repository $Repository --orderby time_desc --top 1 --output tsv --only-show-errors
+        try {
+            $tagToUse = Invoke-AzCli -Arguments @(
+                'acr', 'repository', 'show-tags',
+                '--name', $RegistryName,
+                '--repository', $Repository,
+                '--orderby', 'time_desc',
+                '--top', '1',
+                '--output', 'tsv',
+                '--only-show-errors'
+            )
+        }
+        catch {
+            Write-Host "##[warning]Unable to query latest tag for $Repository in $RegistryName via 'az acr repository show-tags': $($_.Exception.Message)"
+            $tagToUse = $null
+        }
     }
 
     if ([string]::IsNullOrWhiteSpace($tagToUse)) {
         throw "Unable to determine Helm chart tag/version for $Repository in $RegistryName"
     }
 
-    $manifestJson = az acr manifest show --name $RegistryName --repository $Repository --tag $tagToUse --output json --only-show-errors
-    $manifest = $manifestJson | ConvertFrom-Json
+    $manifest = $null
+    try {
+        $manifestJson = Invoke-AzCli -Arguments @(
+            'acr', 'manifest', 'show',
+            '--name', $RegistryName,
+            '--repository', $Repository,
+            '--tag', $tagToUse,
+            '--output', 'json',
+            '--only-show-errors'
+        )
+
+        if (-not [string]::IsNullOrWhiteSpace($manifestJson)) {
+            try {
+                $manifest = $manifestJson | ConvertFrom-Json
+            }
+            catch {
+                Write-Host "##[warning]az acr manifest show returned non-JSON output for ${Repository}:$tagToUse in $RegistryName; falling back to tag."
+                $manifest = $null
+            }
+        }
+    }
+    catch {
+        Write-Host "##[warning]Unable to read manifest for ${Repository}:$tagToUse in $RegistryName via 'az acr manifest show'; falling back to tag. Error: $($_.Exception.Message)"
+        $manifest = $null
+    }
+
     $chartVersion = Get-ChartVersionFromManifestObject -ManifestObject $manifest
 
     if ([string]::IsNullOrWhiteSpace($chartVersion)) {
