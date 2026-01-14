@@ -128,7 +128,7 @@ stages:
           $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
           
           # Extract to get version
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile.FullName -Destination "$(Agent.TempDirectory)/helm-repackage"
+          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination "$(Agent.TempDirectory)/helm-repackage"
           $chartVersion = Get-HelmChartVersion -ChartDirectory $chartPath
           Write-Host "Using chart version: $chartVersion"
           Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
@@ -221,7 +221,7 @@ stages:
           $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Failed to pull chart from Pre ACR."
           
           # Extract to get version
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile.FullName -Destination "$(Agent.TempDirectory)/helm-repackage-live"
+          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination "$(Agent.TempDirectory)/helm-repackage-live"
           $scannedVersion = Get-HelmChartVersion -ChartDirectory $chartPath
           $originalVersion = $scannedVersion -replace '-snyk-scanned', ''
           
@@ -338,7 +338,7 @@ stages:
           $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Unable to locate vulnerable chart artifact"
           
           # Extract and modify version for vulnerable tag
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile.FullName -Destination "$(Agent.TempDirectory)/helm-repackage-vuln"
+          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination "$(Agent.TempDirectory)/helm-repackage-vuln"
           Set-HelmChartVersion -ChartDirectory $chartPath -Version $vulnerableVersion
           
           # Repackage with vulnerable version
