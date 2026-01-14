@@ -48,19 +48,14 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-version-helpers.ps1"
 
           # Extract registry info
           $registryHost = "${{ parameters.sourceHost }}"
           $registryName = $registryHost -split '\.' | Select-Object -First 1
           
           # Get the chart version from manifest (Helm charts don't have sourceTag in webhook)
-          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $registryName --output json | ConvertFrom-Json
-          $chartVersion = $manifest.config.annotations.'org.opencontainers.image.version'
-          
-          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
-            Write-Host "##[warning]Could not determine chart version from manifest, using sourceTag parameter"
-            $chartVersion = "${{ parameters.sourceTag }}"
-          }
+          $chartVersion = Get-HelmChartVersionFromManifest -RegistryName $registryName -Repository "${{ parameters.sourceRepository }}" -FallbackTag "${{ parameters.sourceTag }}"
           
           Write-Host "Helm chart version: $chartVersion"
           Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
@@ -116,6 +111,8 @@ stages:
         inlineScript: |
           . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
           . "$(Build.SourcesDirectory)/scripts/import-helm-package.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-chart-helpers.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-artifact-helpers.ps1"
 
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
@@ -128,38 +125,20 @@ stages:
           $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
           Write-Host "Pulling Helm chart: $chartReference"
           Invoke-HelmRegistryPull -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName
-          $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
-          if (-not $chartFile) {
-            Write-Host "##[error]Unable to locate pulled chart artifact"
-            exit 1
-          }
+          $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
           
           # Extract to get version
-          $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage" -Force
-          tar -xzf $chartFile.FullName -C $extractDir.FullName
-          
-          $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
-          if (-not $chartName) {
-            Write-Host "##[error]Unable to identify chart directory after extraction"
-            exit 1
-          }
-          $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
-          $versionMatch = [regex]::Match($chartYaml, 'version:\s*(.+)')
-          if (-not $versionMatch.Success) {
-            Write-Host "##[error]Unable to detect chart version"
-            exit 1
-          }
-          $chartVersion = $versionMatch.Groups[1].Value.Trim()
+          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile.FullName -Destination "$(Agent.TempDirectory)/helm-repackage"
+          $chartVersion = Get-HelmChartVersion -ChartDirectory $chartPath
           Write-Host "Using chart version: $chartVersion"
           Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
           
           $newVersion = "$chartVersion-snyk-scanned"
           Write-Host "##vso[task.setvariable variable=scannedChartVersion;isOutput=true]$newVersion"
-          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $newVersion"
-          Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
+          Set-HelmChartVersion -ChartDirectory $chartPath -Version $newVersion
           
           # Repackage with new version
-          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartName.FullName -Version $newVersion -Destination $chartDir.FullName
+          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartPath -Version $newVersion -Destination $chartDir.FullName
           
           if (-not $repackagedChart) {
             Write-Host "##[error]Unable to locate repackaged chart"
@@ -215,6 +194,8 @@ stages:
         inlineScript: |
           . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
           . "$(Build.SourcesDirectory)/scripts/import-helm-package.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-chart-helpers.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-artifact-helpers.ps1"
 
           # Create temp directory
           $chartName = "${{ parameters.sourceRepository }}" -split '/' | Select-Object -Last 1
@@ -237,32 +218,21 @@ stages:
           Invoke-HelmRegistryPull -RegistryHost $preRegistryHost -AccessToken $accessToken -ChartReference $preChartRef -Destination $chartDir.FullName -Version $latestTag
           
           # Get the downloaded chart file
-          $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
-          
-          if (-not $chartFile) {
-            Write-Host "##[error]Failed to pull chart from Pre ACR."
-            exit 1
-          }
+          $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Failed to pull chart from Pre ACR."
           
           # Extract to get version
-          $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage-live" -Force
-          tar -xzf $chartFile.FullName -C $extractDir.FullName
-          
-          $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
-          $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
-          $versionMatch = [regex]::Match($chartYaml, 'version:\s*(.+)')
-          $scannedVersion = $versionMatch.Groups[1].Value.Trim()
+          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile.FullName -Destination "$(Agent.TempDirectory)/helm-repackage-live"
+          $scannedVersion = Get-HelmChartVersion -ChartDirectory $chartPath
           $originalVersion = $scannedVersion -replace '-snyk-scanned', ''
           
           Write-Host "Parsed scanned version: $scannedVersion"
           Write-Host "Parsed original version: $originalVersion"
           
           # Modify chart version back to original
-          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $originalVersion"
-          Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
+          Set-HelmChartVersion -ChartDirectory $chartPath -Version $originalVersion
           
           # Repackage with original version
-          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartName.FullName -Version $originalVersion -Destination $chartDir.FullName
+          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartPath -Version $originalVersion -Destination $chartDir.FullName
           
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
@@ -275,7 +245,6 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-package.ps1"
 
           # Extract registry name
           $liveRegistryHost = "${{ parameters.destinationRegistry }}"
@@ -340,6 +309,10 @@ stages:
         scriptLocation: 'inlineScript'
         inlineScript: |
           . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-package.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-chart-helpers.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-artifact-helpers.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-version-helpers.ps1"
 
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
@@ -348,11 +321,7 @@ stages:
           $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
           
           # Get chart version
-          $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
-          $chartVersion = $manifest.config.annotations.'org.opencontainers.image.version'
-          if ([string]::IsNullOrWhiteSpace($chartVersion)) {
-            $chartVersion = "${{ parameters.sourceTag }}"
-          }
+          $chartVersion = Get-HelmChartVersionFromManifest -RegistryName $sourceRegistryName -Repository "${{ parameters.sourceRepository }}" -FallbackTag "${{ parameters.sourceTag }}"
           Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
           $vulnerableVersion = "$chartVersion-vulnerable"
           Write-Host "##vso[task.setvariable variable=vulnerableChartTag]$vulnerableVersion"
@@ -366,19 +335,14 @@ stages:
           Invoke-HelmRegistryPull -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -Version $chartVersion
           
           # Get the downloaded chart file
-          $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
+          $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Unable to locate vulnerable chart artifact"
           
           # Extract and modify version for vulnerable tag
-          $extractDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-repackage-vuln" -Force
-          tar -xzf $chartFile.FullName -C $extractDir.FullName
-          
-          $chartName = Get-ChildItem -Path $extractDir.FullName -Directory | Select-Object -First 1
-          $chartYaml = Get-Content "$($chartName.FullName)/Chart.yaml" -Raw
-          $chartYaml = $chartYaml -replace 'version:\s+.*', "version: $vulnerableVersion"
-          Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
+          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile.FullName -Destination "$(Agent.TempDirectory)/helm-repackage-vuln"
+          Set-HelmChartVersion -ChartDirectory $chartPath -Version $vulnerableVersion
           
           # Repackage with vulnerable version
-          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartName.FullName -Version $vulnerableVersion -Destination $chartDir.FullName
+          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartPath -Version $vulnerableVersion -Destination $chartDir.FullName
           
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
