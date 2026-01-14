@@ -40,12 +40,10 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     steps:
-    - task: AzureCLI@2
-      displayName: 'Login to ACR and Pull Helm Chart'
-      inputs:
+    - template: templates/steps/azurecli-pscore.yml
+      parameters:
+        displayName: 'Login to ACR and Pull Helm Chart'
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
         inlineScript: |
           Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
@@ -101,12 +99,11 @@ stages:
       # Helm appends chart name from Chart.yaml, so use parent path only
       preChartRepository: 'scanned/charts'
     steps:
-    - task: AzureCLI@2
-      displayName: 'Pull Helm Chart from Source ACR'
-      inputs:
+    - template: templates/steps/azurecli-pscore.yml
+      parameters:
+        stepName: pullChart
+        displayName: 'Pull Helm Chart from Source ACR'
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
         inlineScript: |
           Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
@@ -142,14 +139,11 @@ stages:
           }
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
-      name: pullChart
 
-    - task: AzureCLI@2
-      displayName: 'Push Helm Chart to Pre ACR'
-      inputs:
+    - template: templates/steps/azurecli-pscore.yml
+      parameters:
+        displayName: 'Push Helm Chart to Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
         inlineScript: |
           Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
@@ -181,12 +175,10 @@ stages:
       # Helm appends chart name from Chart.yaml, so use parent path only
       preChartRepository: 'scanned/charts'
     steps:
-    - task: AzureCLI@2
-      displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
-      inputs:
+    - template: templates/steps/azurecli-pscore.yml
+      parameters:
+        displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
         inlineScript: |
           Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
@@ -230,12 +222,10 @@ stages:
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
-    - task: AzureCLI@2
-      displayName: 'Push Helm Chart to Live ACR'
-      inputs:
+    - template: templates/steps/azurecli-pscore.yml
+      parameters:
+        displayName: 'Push Helm Chart to Live ACR'
         azureSubscription: '${{ parameters.liveAzureSubscription }}'
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
         inlineScript: |
           Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
@@ -294,12 +284,10 @@ stages:
     variables:
       vulnerableChartRepository: 'vulnerable/${{ parameters.sourceRepository }}'
     steps:
-    - task: AzureCLI@2
-      displayName: 'Pull and Repackage Vulnerable Chart'
-      inputs:
+    - template: templates/steps/azurecli-pscore.yml
+      parameters:
+        displayName: 'Pull and Repackage Vulnerable Chart'
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
         inlineScript: |
           Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
@@ -336,12 +324,10 @@ stages:
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
-    - task: AzureCLI@2
-      displayName: 'Push Vulnerable Chart to Pre ACR'
-      inputs:
+    - template: templates/steps/azurecli-pscore.yml
+      parameters:
+        displayName: 'Push Vulnerable Chart to Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
         inlineScript: |
           Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 

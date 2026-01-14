@@ -1,0 +1,29 @@
+parameters:
+  - name: displayName
+    type: string
+  - name: azureSubscription
+    type: string
+  - name: inlineScript
+    type: string
+  - name: stepName
+    type: string
+    default: ''
+
+steps:
+- ${{ if ne(parameters.stepName, '') }}:
+  - task: AzureCLI@2
+    name: ${{ parameters.stepName }}
+    displayName: ${{ parameters.displayName }}
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'pscore'
+      scriptLocation: 'inlineScript'
+      inlineScript: ${{ parameters.inlineScript }}
+- ${{ if eq(parameters.stepName, '') }}:
+  - task: AzureCLI@2
+    displayName: ${{ parameters.displayName }}
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'pscore'
+      scriptLocation: 'inlineScript'
+      inlineScript: ${{ parameters.inlineScript }}
