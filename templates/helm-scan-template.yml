@@ -47,6 +47,13 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
+          $helpersPath = "$(Build.SourcesDirectory)/scripts/helm-helpers.ps1"
+          if (-not (Test-Path $helpersPath)) {
+            Write-Host "##[error]Helm helper script not found at $helpersPath"
+            exit 1
+          }
+          . $helpersPath
+
           # Extract registry info
           $registryHost = "${{ parameters.sourceHost }}"
           $registryName = $registryHost -split '\.' | Select-Object -First 1
@@ -63,11 +70,7 @@ stages:
           Write-Host "Helm chart version: $chartVersion"
           Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
           
-          $accessToken = az acr login --name $registryName --expose-token --output tsv --query accessToken
-          if ([string]::IsNullOrWhiteSpace($accessToken)) {
-            Write-Host "##[error]Failed to obtain registry token for $registryHost"
-            exit 1
-          }
+          $accessToken = Get-AcrAccessToken -RegistryName $registryName -RegistryHost $registryHost
           
           # Create temp directory for chart
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts" -Force
@@ -75,12 +78,7 @@ stages:
           # Pull the Helm chart
           $chartReference = "oci://$registryHost/${{ parameters.sourceRepository }}"
           Write-Host "Pulling Helm chart: $chartReference --version $chartVersion"
-          try {
-            $accessToken | helm registry login $registryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
-            helm pull $chartReference --version $chartVersion --destination $chartDir.FullName --untar
-          } finally {
-            helm registry logout $registryHost | Out-Null
-          }
+          Invoke-HelmRegistryPull -RegistryHost $registryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -Version $chartVersion -Untar
           
           # Set variable for extracted chart path
           $extractedChart = Get-ChildItem -Path $chartDir.FullName -Directory | Select-Object -First 1
@@ -121,26 +119,24 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
+          $helpersPath = "$(Build.SourcesDirectory)/scripts/helm-helpers.ps1"
+          if (-not (Test-Path $helpersPath)) {
+            Write-Host "##[error]Helm helper script not found at $helpersPath"
+            exit 1
+          }
+          . $helpersPath
+
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
           $sourceRegistryName = $sourceRegistryHost -split '\.' | Select-Object -First 1
           
-          $accessToken = az acr login --name $sourceRegistryName --expose-token --output tsv --query accessToken
-          if ([string]::IsNullOrWhiteSpace($accessToken)) {
-            Write-Host "##[error]Failed to obtain registry token for $sourceRegistryHost"
-            exit 1
-          }
+          $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
           $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-push" -Force
           
           # Pull the Helm chart (without version to get latest if no version)
           $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
           Write-Host "Pulling Helm chart: $chartReference"
-          try {
-            $accessToken | helm registry login $sourceRegistryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
-            helm pull $chartReference --destination $chartDir.FullName
-          } finally {
-            helm registry logout $sourceRegistryHost | Out-Null
-          }
+          Invoke-HelmRegistryPull -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
           if (-not $chartFile) {
             Write-Host "##[error]Unable to locate pulled chart artifact"
@@ -198,27 +194,25 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
+          $helpersPath = "$(Build.SourcesDirectory)/scripts/helm-helpers.ps1"
+          if (-not (Test-Path $helpersPath)) {
+            Write-Host "##[error]Helm helper script not found at $helpersPath"
+            exit 1
+          }
+          . $helpersPath
+
           # Extract registry name
           $preRegistryHost = "${{ parameters.preRegistry }}"
           $preRegistryName = $preRegistryHost -split '\.' | Select-Object -First 1
           
-          $accessToken = az acr login --name $preRegistryName --expose-token --output tsv --query accessToken
-          if ([string]::IsNullOrWhiteSpace($accessToken)) {
-            Write-Host "##[error]Failed to obtain registry token for $preRegistryHost"
-            exit 1
-          }
+          $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
           
           # Push to Pre ACR
           $preChartRef = "oci://$preRegistryHost/$(preChartRepository)"
           $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing Helm chart to: $preChartRef"
           Write-Host "Chart file: $chartPath"
-          try {
-            $accessToken | helm registry login $preRegistryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
-            helm push $chartPath $preChartRef
-          } finally {
-            helm registry logout $preRegistryHost | Out-Null
-          }
+          Invoke-HelmRegistryPush -RegistryHost $preRegistryHost -AccessToken $accessToken -ChartPath $chartPath -ChartReference $preChartRef
 
 - stage: PushHelmToPrivateRepo
   displayName: 'Push scanned Helm chart to Live ACR'
@@ -318,30 +312,26 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
+          $helpersPath = "$(Build.SourcesDirectory)/scripts/helm-helpers.ps1"
+          if (-not (Test-Path $helpersPath)) {
+            Write-Host "##[error]Helm helper script not found at $helpersPath"
+            exit 1
+          }
+          . $helpersPath
+
           # Extract registry name
           $liveRegistryHost = "${{ parameters.destinationRegistry }}"
           $liveRegistryName = $liveRegistryHost -split '\.' | Select-Object -First 1
           
           # Acquire an ACR access token that Helm can use
-          $accessToken = az acr login --name $liveRegistryName --expose-token --output tsv --query accessToken
-          if ([string]::IsNullOrWhiteSpace($accessToken)) {
-            Write-Host "##[error]Failed to obtain access token for Live ACR"
-            exit 1
-          }
+          $accessToken = Get-AcrAccessToken -RegistryName $liveRegistryName -RegistryHost $liveRegistryHost
 
           # Login to Live ACR using Helm's registry auth (token is treated as password)
-          $helmRegistry = $liveRegistryHost
           $liveChartRef = "oci://$liveRegistryHost/scanned/charts"
           $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing Helm chart to: $liveChartRef"
           Write-Host "Chart file: $chartPath"
-          try {
-            Write-Host "Logging into Live ACR registry with Helm..."
-            $accessToken | helm registry login $helmRegistry --username 00000000-0000-0000-0000-000000000000 --password-stdin
-            helm push $chartPath $liveChartRef
-          } finally {
-            helm registry logout $helmRegistry | Out-Null
-          }
+          Invoke-HelmRegistryPush -RegistryHost $liveRegistryHost -AccessToken $accessToken -ChartPath $chartPath -ChartReference $liveChartRef
 
 - stage: AlertOnHelmSuccess
   displayName: 'Alert that Helm scan completed successfully'
