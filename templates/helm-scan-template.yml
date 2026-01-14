@@ -47,12 +47,7 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          $helpersPath = "$(Build.SourcesDirectory)/scripts/helm-helpers.ps1"
-          if (-not (Test-Path $helpersPath)) {
-            Write-Host "##[error]Helm helper script not found at $helpersPath"
-            exit 1
-          }
-          . $helpersPath
+          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
 
           # Extract registry info
           $registryHost = "${{ parameters.sourceHost }}"
@@ -119,12 +114,8 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          $helpersPath = "$(Build.SourcesDirectory)/scripts/helm-helpers.ps1"
-          if (-not (Test-Path $helpersPath)) {
-            Write-Host "##[error]Helm helper script not found at $helpersPath"
-            exit 1
-          }
-          . $helpersPath
+          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-package.ps1"
 
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
@@ -168,16 +159,7 @@ stages:
           Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
           
           # Repackage with new version
-          $packageOutput = helm package $chartName.FullName --destination $chartDir.FullName
-          Write-Host $packageOutput
-          
-          # Extract the actual file path from helm package output
-          if ($packageOutput -match ':\s+(.+\.tgz)$') {
-            $repackagedChart = $matches[1]
-          } else {
-            # Fallback: find the .tgz file
-            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$newVersion.tgz" | Select-Object -First 1).FullName
-          }
+          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartName.FullName -Version $newVersion -Destination $chartDir.FullName
           
           if (-not $repackagedChart) {
             Write-Host "##[error]Unable to locate repackaged chart"
@@ -194,12 +176,7 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          $helpersPath = "$(Build.SourcesDirectory)/scripts/helm-helpers.ps1"
-          if (-not (Test-Path $helpersPath)) {
-            Write-Host "##[error]Helm helper script not found at $helpersPath"
-            exit 1
-          }
-          . $helpersPath
+          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
 
           # Extract registry name
           $preRegistryHost = "${{ parameters.preRegistry }}"
@@ -236,6 +213,9 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
+          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-package.ps1"
+
           # Create temp directory
           $chartName = "${{ parameters.sourceRepository }}" -split '/' | Select-Object -Last 1
           $preChartRepository = "scanned/charts/$chartName"
@@ -244,11 +224,7 @@ stages:
           # Login to Pre ACR and pull scanned chart
           $preRegistryHost = "${{ parameters.preRegistry }}"
           $preRegistryName = $preRegistryHost -split '\.' | Select-Object -First 1
-          $accessToken = az acr login --name $preRegistryName --expose-token --output tsv --query accessToken
-          if ([string]::IsNullOrWhiteSpace($accessToken)) {
-            Write-Host "##[error]Failed to obtain registry token for $preRegistryHost"
-            exit 1
-          }
+          $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
           
           # Get the latest tag for the chart
           $tags = az acr repository show-tags --name $preRegistryName --repository $preChartRepository --output json | ConvertFrom-Json
@@ -258,12 +234,7 @@ stages:
           
           $preChartRef = "oci://$preRegistryHost/$preChartRepository"
           Write-Host "Pulling scanned Helm chart from: $preChartRef --version $latestTag"
-          try {
-            $accessToken | helm registry login $preRegistryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
-            helm pull $preChartRef --version $latestTag --destination $chartDir.FullName
-          } finally {
-            helm registry logout $preRegistryHost | Out-Null
-          }
+          Invoke-HelmRegistryPull -RegistryHost $preRegistryHost -AccessToken $accessToken -ChartReference $preChartRef -Destination $chartDir.FullName -Version $latestTag
           
           # Get the downloaded chart file
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
@@ -291,16 +262,7 @@ stages:
           Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
           
           # Repackage with original version
-          $packageOutput = helm package $chartName.FullName --destination $chartDir.FullName
-          Write-Host $packageOutput
-          
-          # Extract the actual file path from helm package output
-          if ($packageOutput -match ':\s+(.+\.tgz)$') {
-            $repackagedChart = $matches[1]
-          } else {
-            # Fallback: find the .tgz file
-            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$originalVersion.tgz" | Select-Object -First 1).FullName
-          }
+          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartName.FullName -Version $originalVersion -Destination $chartDir.FullName
           
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
@@ -312,12 +274,8 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          $helpersPath = "$(Build.SourcesDirectory)/scripts/helm-helpers.ps1"
-          if (-not (Test-Path $helpersPath)) {
-            Write-Host "##[error]Helm helper script not found at $helpersPath"
-            exit 1
-          }
-          . $helpersPath
+          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
+          . "$(Build.SourcesDirectory)/scripts/import-helm-package.ps1"
 
           # Extract registry name
           $liveRegistryHost = "${{ parameters.destinationRegistry }}"
@@ -381,15 +339,13 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
+          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
+
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
           $sourceRegistryName = $sourceRegistryHost -split '\.' | Select-Object -First 1
           
-          $accessToken = az acr login --name $sourceRegistryName --expose-token --output tsv --query accessToken
-          if ([string]::IsNullOrWhiteSpace($accessToken)) {
-            Write-Host "##[error]Failed to obtain registry token for $sourceRegistryHost"
-            exit 1
-          }
+          $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
           
           # Get chart version
           $manifest = az acr manifest show --name ${{ parameters.sourceRepository }} --registry $sourceRegistryName --output json | ConvertFrom-Json
@@ -407,12 +363,7 @@ stages:
           # Pull the Helm chart
           $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
           Write-Host "Pulling vulnerable Helm chart: $chartReference --version $chartVersion"
-          try {
-            $accessToken | helm registry login $sourceRegistryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
-            helm pull $chartReference --version $chartVersion --destination $chartDir.FullName
-          } finally {
-            helm registry logout $sourceRegistryHost | Out-Null
-          }
+          Invoke-HelmRegistryPull -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -Version $chartVersion
           
           # Get the downloaded chart file
           $chartFile = Get-ChildItem -Path $chartDir.FullName -Filter "*.tgz" | Select-Object -First 1
@@ -427,16 +378,7 @@ stages:
           Set-Content "$($chartName.FullName)/Chart.yaml" -Value $chartYaml
           
           # Repackage with vulnerable version
-          $packageOutput = helm package $chartName.FullName --destination $chartDir.FullName
-          Write-Host $packageOutput
-          
-          # Extract the actual file path from helm package output
-          if ($packageOutput -match ':\s+(.+\.tgz)$') {
-            $repackagedChart = $matches[1]
-          } else {
-            # Fallback: find the .tgz file
-            $repackagedChart = (Get-ChildItem -Path $chartDir.FullName -Filter "*-$vulnerableVersion.tgz" | Select-Object -First 1).FullName
-          }
+          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartName.FullName -Version $vulnerableVersion -Destination $chartDir.FullName
           
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
@@ -448,27 +390,20 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
+          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
+
           # Extract registry name
           $preRegistryHost = "${{ parameters.preRegistry }}"
           $preRegistryName = $preRegistryHost -split '\.' | Select-Object -First 1
           
-          $accessToken = az acr login --name $preRegistryName --expose-token --output tsv --query accessToken
-          if ([string]::IsNullOrWhiteSpace($accessToken)) {
-            Write-Host "##[error]Failed to obtain registry token for $preRegistryHost"
-            exit 1
-          }
+          $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
           
           # Push to vulnerable path in Pre ACR
           $vulnerableChartRef = "oci://$preRegistryHost/$(vulnerableChartRepository)"
           $chartPath = "$(repackagedChartPath)"
           Write-Host "Pushing vulnerable chart to: $vulnerableChartRef"
           Write-Host "Chart file: $chartPath"
-          try {
-            $accessToken | helm registry login $preRegistryHost --username 00000000-0000-0000-0000-000000000000 --password-stdin
-            helm push $chartPath $vulnerableChartRef
-          } finally {
-            helm registry logout $preRegistryHost | Out-Null
-          }
+          Invoke-HelmRegistryPush -RegistryHost $preRegistryHost -AccessToken $accessToken -ChartPath $chartPath -ChartReference $vulnerableChartRef
 
   - job: SendHelmFailureTeamsMessage
     displayName: 'Send Helm Failure Alert to Teams Channel'
