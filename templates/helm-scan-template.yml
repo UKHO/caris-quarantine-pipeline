@@ -47,8 +47,7 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-version-helpers.ps1"
+          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
           # Extract registry info
           $registryHost = "${{ parameters.sourceHost }}"
@@ -109,10 +108,7 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-package.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-chart-helpers.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-artifact-helpers.ps1"
+          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
@@ -155,7 +151,7 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
+          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
           # Extract registry name
           $preRegistryHost = "${{ parameters.preRegistry }}"
@@ -192,10 +188,7 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-package.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-chart-helpers.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-artifact-helpers.ps1"
+          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
           # Create temp directory
           $chartName = "${{ parameters.sourceRepository }}" -split '/' | Select-Object -Last 1
@@ -244,7 +237,7 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
+          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
           # Extract registry name
           $liveRegistryHost = "${{ parameters.destinationRegistry }}"
@@ -308,11 +301,7 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-package.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-chart-helpers.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-artifact-helpers.ps1"
-          . "$(Build.SourcesDirectory)/scripts/import-helm-version-helpers.ps1"
+          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
@@ -354,7 +343,7 @@ stages:
         scriptType: 'pscore'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          . "$(Build.SourcesDirectory)/scripts/import-helm-helpers.ps1"
+          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
           # Extract registry name
           $preRegistryHost = "${{ parameters.preRegistry }}"
