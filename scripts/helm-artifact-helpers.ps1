@@ -12,5 +12,10 @@ function Get-HelmChartArchivePath {
         throw "##[error]$ErrorMessage"
     }
 
-    return $chartFile.FullName
+    $chartPath = $chartFile.FullName
+    if ([string]::IsNullOrWhiteSpace($chartPath)) {
+        throw "##[error]$ErrorMessage"
+    }
+
+    return $chartPath
 }
