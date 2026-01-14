@@ -40,7 +40,7 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     steps:
-    - template: templates/steps/azurecli-pscore.yml
+    - template: steps/azurecli-pscore.yml
       parameters:
         displayName: 'Login to ACR and Pull Helm Chart'
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
@@ -99,7 +99,7 @@ stages:
       # Helm appends chart name from Chart.yaml, so use parent path only
       preChartRepository: 'scanned/charts'
     steps:
-    - template: templates/steps/azurecli-pscore.yml
+    - template: steps/azurecli-pscore.yml
       parameters:
         stepName: pullChart
         displayName: 'Pull Helm Chart from Source ACR'
@@ -140,7 +140,7 @@ stages:
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
-    - template: templates/steps/azurecli-pscore.yml
+    - template: steps/azurecli-pscore.yml
       parameters:
         displayName: 'Push Helm Chart to Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
@@ -175,7 +175,7 @@ stages:
       # Helm appends chart name from Chart.yaml, so use parent path only
       preChartRepository: 'scanned/charts'
     steps:
-    - template: templates/steps/azurecli-pscore.yml
+    - template: steps/azurecli-pscore.yml
       parameters:
         displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
@@ -222,7 +222,7 @@ stages:
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
-    - template: templates/steps/azurecli-pscore.yml
+    - template: steps/azurecli-pscore.yml
       parameters:
         displayName: 'Push Helm Chart to Live ACR'
         azureSubscription: '${{ parameters.liveAzureSubscription }}'
@@ -284,7 +284,7 @@ stages:
     variables:
       vulnerableChartRepository: 'vulnerable/${{ parameters.sourceRepository }}'
     steps:
-    - template: templates/steps/azurecli-pscore.yml
+    - template: steps/azurecli-pscore.yml
       parameters:
         displayName: 'Pull and Repackage Vulnerable Chart'
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
@@ -324,7 +324,7 @@ stages:
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
-    - template: templates/steps/azurecli-pscore.yml
+    - template: steps/azurecli-pscore.yml
       parameters:
         displayName: 'Push Vulnerable Chart to Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
