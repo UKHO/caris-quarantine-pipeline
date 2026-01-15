@@ -16,6 +16,7 @@
         'Get-HelmChartArchiveFromRegistry',
         'Invoke-HelmRegistryPush',
         'Invoke-HelmPackage',
+        'Invoke-HelmRepackageWithVersion',
         'Expand-HelmChartArchive',
         'Get-HelmChartVersion',
         'Set-HelmChartVersion',

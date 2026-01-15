@@ -126,10 +126,9 @@ stages:
           
           $newVersion = "$chartVersion-snyk-scanned"
           Write-Host "##vso[task.setvariable variable=scannedChartVersion;isOutput=true]$newVersion"
-          Set-HelmChartVersion -ChartDirectory $chartPath -Version $newVersion
           
           # Repackage with new version
-          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartPath -Version $newVersion -Destination $chartDir.FullName
+          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartDirectory $chartPath -NewVersion $newVersion -OutputDirectory $chartDir.FullName
           
           if (-not $repackagedChart) {
             Write-Host "##[error]Unable to locate repackaged chart"
@@ -206,11 +205,8 @@ stages:
           Write-Host "Parsed scanned version: $scannedVersion"
           Write-Host "Parsed original version: $originalVersion"
           
-          # Modify chart version back to original
-          Set-HelmChartVersion -ChartDirectory $chartPath -Version $originalVersion
-          
           # Repackage with original version
-          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartPath -Version $originalVersion -Destination $chartDir.FullName
+          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartDirectory $chartPath -NewVersion $originalVersion -OutputDirectory $chartDir.FullName
           
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
@@ -302,13 +298,8 @@ stages:
           Write-Host "Pulling vulnerable Helm chart: $chartReference --version $chartVersion"
           $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -Version $chartVersion -ErrorMessage "Unable to locate vulnerable chart artifact"
           
-          # Extract and modify version for vulnerable tag
-          $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-vuln'
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination $repackageDir.FullName
-          Set-HelmChartVersion -ChartDirectory $chartPath -Version $vulnerableVersion
-          
           # Repackage with vulnerable version
-          $repackagedChart = Invoke-HelmPackage -ChartDirectory $chartPath -Version $vulnerableVersion -Destination $chartDir.FullName
+          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartArchivePath $chartFile -NewVersion $vulnerableVersion -OutputDirectory $chartDir.FullName
           
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"

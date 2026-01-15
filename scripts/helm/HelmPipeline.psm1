@@ -229,6 +229,47 @@ function Invoke-HelmPackage {
     return (Get-ChildItem -Path ($Destination ?? (Split-Path $ChartDirectory -Parent)) -Filter $artifactPattern | Select-Object -First 1).FullName
 }
 
+function Invoke-HelmRepackageWithVersion {
+    [CmdletBinding(DefaultParameterSetName = 'Archive')]
+    param(
+        [Parameter(Mandatory, ParameterSetName = 'Archive')]
+        [string]$ChartArchivePath,
+
+        [Parameter(Mandatory, ParameterSetName = 'Directory')]
+        [string]$ChartDirectory,
+
+        [Parameter(Mandatory)]
+        [string]$NewVersion,
+
+        [Parameter(Mandatory)]
+        [string]$OutputDirectory,
+
+        [Parameter(ParameterSetName = 'Archive')]
+        [string]$ExtractDirectory
+    )
+
+    $chartPathToPackage = $null
+
+    if ($PSCmdlet.ParameterSetName -eq 'Archive') {
+        $extractRoot = $ExtractDirectory
+        if ([string]::IsNullOrWhiteSpace($extractRoot)) {
+            $extractRoot = (New-PipelineTempDirectory -Name ("helm-repackage-" + [System.Guid]::NewGuid().ToString('N'))).FullName
+        }
+
+        $chartPathToPackage = Expand-HelmChartArchive -ChartArchivePath $ChartArchivePath -Destination $extractRoot
+    }
+    else {
+        $chartPathToPackage = $ChartDirectory
+    }
+
+    if ([string]::IsNullOrWhiteSpace($chartPathToPackage)) {
+        throw 'Unable to determine chart directory for repackaging'
+    }
+
+    Set-HelmChartVersion -ChartDirectory $chartPathToPackage -Version $NewVersion
+    return Invoke-HelmPackage -ChartDirectory $chartPathToPackage -Version $NewVersion -Destination $OutputDirectory
+}
+
 function Expand-HelmChartArchive {
     [CmdletBinding()]
     param(
@@ -456,6 +497,7 @@ Export-ModuleMember -Function @(
     'Get-HelmChartArchiveFromRegistry',
     'Invoke-HelmRegistryPush',
     'Invoke-HelmPackage',
+    'Invoke-HelmRepackageWithVersion',
     'Expand-HelmChartArchive',
     'Get-HelmChartVersion',
     'Set-HelmChartVersion',
