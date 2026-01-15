@@ -1,0 +1,33 @@
+parameters:
+  - name: displayName
+    type: string
+  - name: azureSubscription
+    type: string
+  - name: registryHost
+    type: string
+  - name: repository
+    type: string
+  - name: chartPath
+    type: string
+  - name: stepName
+    type: string
+    default: ''
+
+steps:
+- template: azurecli-pscore.yml
+  parameters:
+    displayName: ${{ parameters.displayName }}
+    azureSubscription: ${{ parameters.azureSubscription }}
+    stepName: ${{ parameters.stepName }}
+    importHelmPipelineModule: true
+    inlineScript: |
+      $registryHost = "${{ parameters.registryHost }}"
+      $registryName = Get-AcrRegistryNameFromHost -RegistryHost $registryHost
+      $accessToken = Get-AcrAccessToken -RegistryName $registryName -RegistryHost $registryHost
+
+      $chartRef = "oci://$registryHost/${{ parameters.repository }}"
+      $chartPath = "${{ parameters.chartPath }}"
+
+      Write-Host "Pushing Helm chart to: $chartRef"
+      Write-Host "Chart file: $chartPath"
+      Invoke-HelmRegistryPush -RegistryHost $registryHost -AccessToken $accessToken -ChartPath $chartPath -ChartReference $chartRef

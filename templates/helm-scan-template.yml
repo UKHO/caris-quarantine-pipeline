@@ -137,24 +137,13 @@ stages:
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
-    - template: steps/azurecli-pscore.yml
+    - template: steps/helm-push-to-acr.yml
       parameters:
         displayName: 'Push Helm Chart to Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
-        importHelmPipelineModule: true
-        inlineScript: |
-          # Extract registry name
-          $preRegistryHost = "${{ parameters.preRegistry }}"
-          $preRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $preRegistryHost
-          
-          $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
-          
-          # Push to Pre ACR
-          $preChartRef = "oci://$preRegistryHost/$(preChartRepository)"
-          $chartPath = "$(repackagedChartPath)"
-          Write-Host "Pushing Helm chart to: $preChartRef"
-          Write-Host "Chart file: $chartPath"
-          Invoke-HelmRegistryPush -RegistryHost $preRegistryHost -AccessToken $accessToken -ChartPath $chartPath -ChartReference $preChartRef
+        registryHost: '${{ parameters.preRegistry }}'
+        repository: '$(preChartRepository)'
+        chartPath: '$(repackagedChartPath)'
 
 - stage: PushHelmToPrivateRepo
   displayName: 'Push scanned Helm chart to Live ACR'
@@ -211,25 +200,13 @@ stages:
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
-    - template: steps/azurecli-pscore.yml
+    - template: steps/helm-push-to-acr.yml
       parameters:
         displayName: 'Push Helm Chart to Live ACR'
         azureSubscription: '${{ parameters.liveAzureSubscription }}'
-        importHelmPipelineModule: true
-        inlineScript: |
-          # Extract registry name
-          $liveRegistryHost = "${{ parameters.destinationRegistry }}"
-          $liveRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $liveRegistryHost
-          
-          # Acquire an ACR access token that Helm can use
-          $accessToken = Get-AcrAccessToken -RegistryName $liveRegistryName -RegistryHost $liveRegistryHost
-
-          # Login to Live ACR using Helm's registry auth (token is treated as password)
-          $liveChartRef = "oci://$liveRegistryHost/scanned/charts"
-          $chartPath = "$(repackagedChartPath)"
-          Write-Host "Pushing Helm chart to: $liveChartRef"
-          Write-Host "Chart file: $chartPath"
-          Invoke-HelmRegistryPush -RegistryHost $liveRegistryHost -AccessToken $accessToken -ChartPath $chartPath -ChartReference $liveChartRef
+        registryHost: '${{ parameters.destinationRegistry }}'
+        repository: 'scanned/charts'
+        chartPath: '$(repackagedChartPath)'
 
 - stage: AlertOnHelmSuccess
   displayName: 'Alert that Helm scan completed successfully'
@@ -304,24 +281,13 @@ stages:
           Write-Host "Repackaged chart path: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
-    - template: steps/azurecli-pscore.yml
+    - template: steps/helm-push-to-acr.yml
       parameters:
         displayName: 'Push Vulnerable Chart to Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
-        importHelmPipelineModule: true
-        inlineScript: |
-          # Extract registry name
-          $preRegistryHost = "${{ parameters.preRegistry }}"
-          $preRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $preRegistryHost
-          
-          $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
-          
-          # Push to vulnerable path in Pre ACR
-          $vulnerableChartRef = "oci://$preRegistryHost/$(vulnerableChartRepository)"
-          $chartPath = "$(repackagedChartPath)"
-          Write-Host "Pushing vulnerable chart to: $vulnerableChartRef"
-          Write-Host "Chart file: $chartPath"
-          Invoke-HelmRegistryPush -RegistryHost $preRegistryHost -AccessToken $accessToken -ChartPath $chartPath -ChartReference $vulnerableChartRef
+        registryHost: '${{ parameters.preRegistry }}'
+        repository: '$(vulnerableChartRepository)'
+        chartPath: '$(repackagedChartPath)'
 
   - job: SendHelmFailureTeamsMessage
     displayName: 'Send Helm Failure Alert to Teams Channel'
