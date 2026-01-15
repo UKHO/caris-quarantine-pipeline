@@ -49,7 +49,7 @@ stages:
 
           # Extract registry info
           $registryHost = "${{ parameters.sourceHost }}"
-          $registryName = $registryHost -split '\.' | Select-Object -First 1
+          $registryName = Get-AcrRegistryNameFromHost -RegistryHost $registryHost
           
           # Get the chart version from manifest (Helm charts don't have sourceTag in webhook)
           $chartVersion = Get-HelmChartVersionFromManifest -RegistryName $registryName -Repository "${{ parameters.sourceRepository }}" -FallbackTag "${{ parameters.sourceTag }}"
@@ -60,7 +60,7 @@ stages:
           $accessToken = Get-AcrAccessToken -RegistryName $registryName -RegistryHost $registryHost
           
           # Create temp directory for chart
-          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts" -Force
+          $chartDir = New-PipelineTempDirectory -Name 'helm-charts'
           
           # Pull the Helm chart
           $chartReference = "oci://$registryHost/${{ parameters.sourceRepository }}"
@@ -109,10 +109,10 @@ stages:
 
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
-          $sourceRegistryName = $sourceRegistryHost -split '\.' | Select-Object -First 1
+          $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
           
           $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
-          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-push" -Force
+          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-push'
           
           # Pull the Helm chart (without version to get latest if no version)
           $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
@@ -121,7 +121,8 @@ stages:
           $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
           
           # Extract to get version
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination "$(Agent.TempDirectory)/helm-repackage"
+          $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage'
+          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination $repackageDir.FullName
           $chartVersion = Get-HelmChartVersion -ChartDirectory $chartPath
           Write-Host "Using chart version: $chartVersion"
           Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
@@ -149,7 +150,7 @@ stages:
 
           # Extract registry name
           $preRegistryHost = "${{ parameters.preRegistry }}"
-          $preRegistryName = $preRegistryHost -split '\.' | Select-Object -First 1
+          $preRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $preRegistryHost
           
           $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
           
@@ -185,11 +186,11 @@ stages:
           # Create temp directory
           $chartName = "${{ parameters.sourceRepository }}" -split '/' | Select-Object -Last 1
           $preChartRepository = "scanned/charts/$chartName"
-          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-final" -Force
+          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-final'
           
           # Login to Pre ACR and pull scanned chart
           $preRegistryHost = "${{ parameters.preRegistry }}"
-          $preRegistryName = $preRegistryHost -split '\.' | Select-Object -First 1
+          $preRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $preRegistryHost
           $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
           
           # Get the latest tag for the chart
@@ -206,7 +207,8 @@ stages:
           $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Failed to pull chart from Pre ACR."
           
           # Extract to get version
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination "$(Agent.TempDirectory)/helm-repackage-live"
+          $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-live'
+          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination $repackageDir.FullName
           $scannedVersion = Get-HelmChartVersion -ChartDirectory $chartPath
           $originalVersion = $scannedVersion -replace '-snyk-scanned', ''
           
@@ -231,7 +233,7 @@ stages:
 
           # Extract registry name
           $liveRegistryHost = "${{ parameters.destinationRegistry }}"
-          $liveRegistryName = $liveRegistryHost -split '\.' | Select-Object -First 1
+          $liveRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $liveRegistryHost
           
           # Acquire an ACR access token that Helm can use
           $accessToken = Get-AcrAccessToken -RegistryName $liveRegistryName -RegistryHost $liveRegistryHost
@@ -293,7 +295,7 @@ stages:
 
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
-          $sourceRegistryName = $sourceRegistryHost -split '\.' | Select-Object -First 1
+          $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
           
           $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
           
@@ -304,7 +306,7 @@ stages:
           Write-Host "##vso[task.setvariable variable=vulnerableChartTag]$vulnerableVersion"
           
           # Create temp directory
-          $chartDir = New-Item -ItemType Directory -Path "$(Agent.TempDirectory)/helm-charts-vulnerable" -Force
+          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-vulnerable'
           
           # Pull the Helm chart
           $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
@@ -315,7 +317,8 @@ stages:
           $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Unable to locate vulnerable chart artifact"
           
           # Extract and modify version for vulnerable tag
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination "$(Agent.TempDirectory)/helm-repackage-vuln"
+          $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-vuln'
+          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination $repackageDir.FullName
           Set-HelmChartVersion -ChartDirectory $chartPath -Version $vulnerableVersion
           
           # Repackage with vulnerable version
@@ -333,7 +336,7 @@ stages:
 
           # Extract registry name
           $preRegistryHost = "${{ parameters.preRegistry }}"
-          $preRegistryName = $preRegistryHost -split '\.' | Select-Object -First 1
+          $preRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $preRegistryHost
           
           $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
           

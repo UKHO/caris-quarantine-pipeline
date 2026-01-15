@@ -2,6 +2,39 @@ Set-StrictMode -Version Latest
 
 $ErrorActionPreference = 'Stop'
 
+function Get-AcrRegistryNameFromHost {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$RegistryHost
+    )
+
+    $hostValue = $RegistryHost.Trim()
+    if ([string]::IsNullOrWhiteSpace($hostValue)) {
+        throw 'RegistryHost cannot be empty'
+    }
+
+    return ($hostValue -split '\.')[0]
+}
+
+function New-PipelineTempDirectory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    $root = $env:AGENT_TEMPDIRECTORY
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        $root = [System.IO.Path]::GetTempPath()
+    }
+
+    $path = Join-Path $root $Name
+    $dir = New-Item -ItemType Directory -Path $path -Force
+    Write-Host "Using temp directory: $($dir.FullName)"
+    return $dir
+}
+
 function Get-AcrAccessToken {
     [CmdletBinding()]
     param(
@@ -370,6 +403,8 @@ function Get-HelmChartArchivePath {
 }
 
 Export-ModuleMember -Function @(
+    'Get-AcrRegistryNameFromHost',
+    'New-PipelineTempDirectory',
     'Get-AcrAccessToken',
     'Invoke-HelmRegistryCommand',
     'Invoke-HelmRegistryPull',

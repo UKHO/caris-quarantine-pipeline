@@ -7,6 +7,8 @@
     PowerShellVersion = '7.0'
 
     FunctionsToExport = @(
+        'Get-AcrRegistryNameFromHost',
+        'New-PipelineTempDirectory',
         'Get-AcrAccessToken',
         'Invoke-HelmRegistryCommand',
         'Invoke-HelmRegistryPull',
