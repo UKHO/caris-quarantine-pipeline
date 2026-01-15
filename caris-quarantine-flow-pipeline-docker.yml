@@ -8,6 +8,7 @@ resources:
       filters:
         - path: target.mediaType
           value: "application/vnd.docker.distribution.manifest.v2+json"
+                  
 
 variables:
   - group: caris-quarantine

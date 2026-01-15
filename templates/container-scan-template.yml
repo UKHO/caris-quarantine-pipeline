@@ -25,6 +25,7 @@ parameters:
 stages:
 - stage: ScanContainer
   displayName: 'Scan Container'
+  condition: succeeded()
   jobs:
   - job: ContainerScan
     displayName: 'Scan Pushed Image'
@@ -60,7 +61,7 @@ stages:
 - stage: PushToPreACR
   displayName: 'Push scanned image to Pre ACR'
   dependsOn: ScanContainer
-  condition: succeeded()
+  condition: succeeded('ScanContainer')
   jobs:
   - job: PushToPre
     displayName: 'Push to Pre ACR'
@@ -106,16 +107,10 @@ stages:
         command: 'push'
         tags: '$(scannedImageTag)'
 
-    - script: |
-        echo "✅ Container pushed to Pre ACR successfully!"
-        echo "Source image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
-        echo "Pre image: $(fullPreImageName)"
-      displayName: 'Pre Push Summary'
-
 - stage: PushToPrivateRepo
-  displayName: 'Push passed image to Private ACR'
+  displayName: 'Push passed image to Live ACR'
   dependsOn: PushToPreACR
-  condition: succeeded()
+  condition: succeeded('PushToPreACR')
   jobs:
   - job: PullTagAndPush
     displayName: 'Pull, Tag and Push the image to the Private ACR'
@@ -161,16 +156,10 @@ stages:
         command: 'push'
         tags: '$(scannedImageTag)'
 
-    - script: |
-        echo "✅ Container scanning and push completed successfully!"
-        echo "Source image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
-        echo "Destination image: $(fullDestinationImageName)"
-      displayName: 'Pipeline Summary'
-
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
   dependsOn: [PushToPreACR, PushToPrivateRepo]
-  condition: succeeded()
+  condition: and(succeeded('PushToPreACR'), succeeded('PushToPrivateRepo'))
   jobs:
   - job: SendSuccessTeamsMessage
     displayName: 'Send Success Alert to Teams Channel'
@@ -202,10 +191,10 @@ stages:
 - stage: AlertOnFail
   displayName: 'Alert that vulnerable image present'
   dependsOn: ScanContainer
-  condition: failed()
+  condition: failed('ScanContainer')
   jobs:
   - job: PushPreVulnerableImage
-    displayName: 'Push Vulnerable Image to Pre vulnerable namespace'
+    displayName: 'Push Vulnerable Image to Pre ACR'
     pool:
       name: Tiberius
       demands:
@@ -249,7 +238,7 @@ stages:
         tags: '$(vulnerableImageTag)'
 
   - job: PushVulnerableImage
-    displayName: 'Push Vulnerable Image to vulnerable namespace'
+    displayName: 'Push Vulnerable Image to Live ACR'
     dependsOn: PushPreVulnerableImage
     pool:
       name: Tiberius
@@ -322,7 +311,3 @@ stages:
           
           Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
 
-    - script: |
-        echo "❌ Container scanning failed!"
-        echo "Source image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
-      displayName: 'Pipeline Summary'
