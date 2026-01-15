@@ -115,8 +115,7 @@ stages:
           # Pull the Helm chart (without version to get latest if no version)
           $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
           Write-Host "Pulling Helm chart: $chartReference"
-          Invoke-HelmRegistryPull -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName
-          $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
+          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
           
           # Extract to get version
           $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage'
@@ -196,10 +195,7 @@ stages:
           
           $preChartRef = "oci://$preRegistryHost/$preChartRepository"
           Write-Host "Pulling scanned Helm chart from: $preChartRef --version $latestTag"
-          Invoke-HelmRegistryPull -RegistryHost $preRegistryHost -AccessToken $accessToken -ChartReference $preChartRef -Destination $chartDir.FullName -Version $latestTag
-          
-          # Get the downloaded chart file
-          $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Failed to pull chart from Pre ACR."
+          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $preRegistryHost -AccessToken $accessToken -ChartReference $preChartRef -Destination $chartDir.FullName -Version $latestTag -ErrorMessage "Failed to pull chart from Pre ACR."
           
           # Extract to get version
           $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-live'
@@ -304,10 +300,7 @@ stages:
           # Pull the Helm chart
           $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
           Write-Host "Pulling vulnerable Helm chart: $chartReference --version $chartVersion"
-          Invoke-HelmRegistryPull -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -Version $chartVersion
-          
-          # Get the downloaded chart file
-          $chartFile = Get-HelmChartArchivePath -SearchDirectory $chartDir.FullName -ErrorMessage "Unable to locate vulnerable chart artifact"
+          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -Version $chartVersion -ErrorMessage "Unable to locate vulnerable chart artifact"
           
           # Extract and modify version for vulnerable tag
           $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-vuln'

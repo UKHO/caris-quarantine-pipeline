@@ -156,6 +156,30 @@ function Invoke-HelmRegistryPull {
     Invoke-HelmRegistryCommand -RegistryHost $RegistryHost -AccessToken $AccessToken -HelmArguments $args
 }
 
+function Get-HelmChartArchiveFromRegistry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$RegistryHost,
+
+        [Parameter(Mandatory)]
+        [string]$AccessToken,
+
+        [Parameter(Mandatory)]
+        [string]$ChartReference,
+
+        [Parameter(Mandatory)]
+        [string]$Destination,
+
+        [string]$Version,
+
+        [string]$ErrorMessage = 'Unable to locate pulled chart artifact'
+    )
+
+    Invoke-HelmRegistryPull -RegistryHost $RegistryHost -AccessToken $AccessToken -ChartReference $ChartReference -Destination $Destination -Version $Version
+    return Get-HelmChartArchivePath -SearchDirectory $Destination -ErrorMessage $ErrorMessage
+}
+
 function Invoke-HelmRegistryPush {
     [CmdletBinding()]
     param(
@@ -429,6 +453,7 @@ Export-ModuleMember -Function @(
     'Get-AcrLatestTag',
     'Invoke-HelmRegistryCommand',
     'Invoke-HelmRegistryPull',
+    'Get-HelmChartArchiveFromRegistry',
     'Invoke-HelmRegistryPush',
     'Invoke-HelmPackage',
     'Expand-HelmChartArchive',

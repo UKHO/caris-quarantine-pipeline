@@ -13,6 +13,7 @@
         'Get-AcrLatestTag',
         'Invoke-HelmRegistryCommand',
         'Invoke-HelmRegistryPull',
+        'Get-HelmChartArchiveFromRegistry',
         'Invoke-HelmRegistryPush',
         'Invoke-HelmPackage',
         'Expand-HelmChartArchive',
