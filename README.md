@@ -23,6 +23,10 @@ Both pipelines share the same webhook resource (`AcrWebhookTrigger`) but use man
 | `caris-quarantine-flow-pipeline-oci.yml` | Root pipeline subscribed to OCI manifest webhook events; references the dedicated Helm template only. |
 | `templates/container-scan-template.yml` | Implements the container workflow (ScanContainer → PushToPreACR → PushToPrivateRepo → alert stages). |
 | `templates/helm-scan-template.yml` | Implements the Helm workflow (ScanHelmChart → push scanned chart to Pre/Live → alerts, plus a vulnerable-rollback path).
+| `scripts/helm/HelmPipeline.psm1` | PowerShell module implementation: Helm/ACR helper functions used by the Helm pipeline to reduce duplicated inline scripting and standardize error handling. |
+| `scripts/helm/HelmPipeline.psd1` | PowerShell module manifest: defines the exported/public functions for the Helm pipeline module and compatibility metadata. |
+| `templates/steps/azurecli-pscore.yml` | Reusable step template wrapping `AzureCLI@2` with PowerShell Core; supports an optional step name and optional auto-import of `HelmPipeline`. |
+| `templates/steps/helm-push-to-acr.yml` | Reusable step template that pushes a packaged Helm chart `.tgz` to an ACR OCI repository using `HelmPipeline` helpers. |
 
 ### Webhook data flow
 1. The ACR webhook calls the shared service URI with payload metadata.
@@ -50,6 +54,22 @@ Required root variables/service connections (defined in `caris-quarantine-flow-p
 - Repackages clean charts with a `-snyk-scanned` suffix, pushes to Pre (`oci://{preRegistry}/scanned/charts`), then strips the suffix and promotes to Live.
 - On scan failure, republishes to `vulnerable/{sourceRepository}` inside the Pre registry for forensic use.
 - Every Helm pull/push obtains an access token with `az acr login --expose-token`, feeds it into `helm registry login --password-stdin`, and ensures `helm registry logout` executes via `try/finally` blocks.
+
+### Helm pipeline refactor (de-duplication)
+The Helm pipeline intentionally keeps high-level orchestration (stage flow, `##vso[task.setvariable ...]` wiring, and conditions) in YAML, and moves repeatable “mechanics” into a PowerShell module.
+
+- The PowerShell module lives in [scripts/helm/HelmPipeline.psm1](scripts/helm/HelmPipeline.psm1) and is imported via [scripts/helm/HelmPipeline.psd1](scripts/helm/HelmPipeline.psd1).
+- Common operations are exposed as functions so inline scripts remain short and consistent. Examples:
+   - `Get-AcrAccessToken`, `Invoke-HelmRegistryPull`, `Invoke-HelmRegistryPush`
+   - `Get-AcrLatestTag` (latest ACR tag by time)
+   - `Get-HelmChartArchiveFromRegistry` (pull + locate `.tgz`)
+   - `Invoke-HelmRepackageWithVersion` (extract/set version/package; returns repackaged `.tgz` path)
+
+### YAML step templates
+To avoid repeating AzureCLI boilerplate and push logic, the Helm template composes two small step templates:
+
+- [templates/steps/azurecli-pscore.yml](templates/steps/azurecli-pscore.yml): wraps `AzureCLI@2` with PowerShell Core and optionally auto-imports the Helm module.
+- [templates/steps/helm-push-to-acr.yml](templates/steps/helm-push-to-acr.yml): standard “push chart to registry” step used for Pre, Live, and vulnerable pushes.
 
 Additional variables this pipeline expects (see `caris-quarantine-flow-pipeline-oci.yml`):
 - `sourceAzureSubscription`, `preAzureSubscription`, `liveAzureSubscription` (match Azure service connections that have ACR RBAC).
