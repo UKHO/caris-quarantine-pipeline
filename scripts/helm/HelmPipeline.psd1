@@ -10,6 +10,7 @@
         'Get-AcrRegistryNameFromHost',
         'New-PipelineTempDirectory',
         'Get-AcrAccessToken',
+        'Get-AcrLatestTag',
         'Invoke-HelmRegistryCommand',
         'Invoke-HelmRegistryPull',
         'Invoke-HelmRegistryPush',

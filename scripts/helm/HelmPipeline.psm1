@@ -2,6 +2,26 @@ Set-StrictMode -Version Latest
 
 $ErrorActionPreference = 'Stop'
 
+function Invoke-AzCli {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Arguments
+    )
+
+    $output = & az @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        $message = ($output | Out-String).Trim()
+        if ([string]::IsNullOrWhiteSpace($message)) {
+            $message = "az exited with code $exitCode"
+        }
+        throw $message
+    }
+
+    return ($output | Out-String).Trim()
+}
+
 function Get-AcrRegistryNameFromHost {
     [CmdletBinding()]
     param(
@@ -51,6 +71,34 @@ function Get-AcrAccessToken {
     }
 
     return $accessToken
+}
+
+function Get-AcrLatestTag {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$RegistryName,
+
+        [Parameter(Mandatory)]
+        [string]$Repository
+    )
+
+    $tag = Invoke-AzCli -Arguments @(
+        'acr', 'repository', 'show-tags',
+        '--name', $RegistryName,
+        '--repository', $Repository,
+        '--orderby', 'time_desc',
+        '--top', '1',
+        '--output', 'tsv',
+        '--only-show-errors'
+    )
+
+    $tag = ($tag -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if ([string]::IsNullOrWhiteSpace($tag)) {
+        throw "No tags found for $Repository in $RegistryName"
+    }
+
+    return $tag
 }
 
 function Invoke-HelmRegistryCommand {
@@ -242,26 +290,6 @@ function Get-HelmChartVersionFromManifest {
         [string]$FallbackTag
     )
 
-    function Invoke-AzCli {
-        [CmdletBinding()]
-        param(
-            [Parameter(Mandatory)]
-            [string[]]$Arguments
-        )
-
-        $output = & az @Arguments 2>&1
-        $exitCode = $LASTEXITCODE
-        if ($exitCode -ne 0) {
-            $message = ($output | Out-String).Trim()
-            if ([string]::IsNullOrWhiteSpace($message)) {
-                $message = "az exited with code $exitCode"
-            }
-            throw $message
-        }
-
-        return ($output | Out-String).Trim()
-    }
-
     function Get-ObjectPropertyValue {
         param(
             [Parameter(Mandatory)]
@@ -320,15 +348,7 @@ function Get-HelmChartVersionFromManifest {
     $tagToUse = $FallbackTag
     if ([string]::IsNullOrWhiteSpace($tagToUse)) {
         try {
-            $tagToUse = Invoke-AzCli -Arguments @(
-                'acr', 'repository', 'show-tags',
-                '--name', $RegistryName,
-                '--repository', $Repository,
-                '--orderby', 'time_desc',
-                '--top', '1',
-                '--output', 'tsv',
-                '--only-show-errors'
-            )
+            $tagToUse = Get-AcrLatestTag -RegistryName $RegistryName -Repository $Repository
         }
         catch {
             Write-Host "##[warning]Unable to query latest tag for $Repository in $RegistryName via 'az acr repository show-tags': $($_.Exception.Message)"
@@ -406,6 +426,7 @@ Export-ModuleMember -Function @(
     'Get-AcrRegistryNameFromHost',
     'New-PipelineTempDirectory',
     'Get-AcrAccessToken',
+    'Get-AcrLatestTag',
     'Invoke-HelmRegistryCommand',
     'Invoke-HelmRegistryPull',
     'Invoke-HelmRegistryPush',

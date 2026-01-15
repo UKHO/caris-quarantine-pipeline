@@ -44,9 +44,8 @@ stages:
       parameters:
         displayName: 'Login to ACR and Pull Helm Chart'
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+        importHelmPipelineModule: true
         inlineScript: |
-          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
-
           # Extract registry info
           $registryHost = "${{ parameters.sourceHost }}"
           $registryName = Get-AcrRegistryNameFromHost -RegistryHost $registryHost
@@ -104,9 +103,8 @@ stages:
         stepName: pullChart
         displayName: 'Pull Helm Chart from Source ACR'
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+        importHelmPipelineModule: true
         inlineScript: |
-          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
-
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
           $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
@@ -145,9 +143,8 @@ stages:
       parameters:
         displayName: 'Push Helm Chart to Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
+        importHelmPipelineModule: true
         inlineScript: |
-          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
-
           # Extract registry name
           $preRegistryHost = "${{ parameters.preRegistry }}"
           $preRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $preRegistryHost
@@ -180,9 +177,8 @@ stages:
       parameters:
         displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
+        importHelmPipelineModule: true
         inlineScript: |
-          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
-
           # Create temp directory
           $chartName = "${{ parameters.sourceRepository }}" -split '/' | Select-Object -Last 1
           $preChartRepository = "scanned/charts/$chartName"
@@ -194,8 +190,7 @@ stages:
           $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
           
           # Get the latest tag for the chart
-          $tags = az acr repository show-tags --name $preRegistryName --repository $preChartRepository --output json | ConvertFrom-Json
-          $latestTag = ($tags | Sort-Object -Descending | Select-Object -First 1)
+          $latestTag = Get-AcrLatestTag -RegistryName $preRegistryName -Repository $preChartRepository
           
           Write-Host "Latest tag for chart: $latestTag"
           
@@ -228,9 +223,8 @@ stages:
       parameters:
         displayName: 'Push Helm Chart to Live ACR'
         azureSubscription: '${{ parameters.liveAzureSubscription }}'
+        importHelmPipelineModule: true
         inlineScript: |
-          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
-
           # Extract registry name
           $liveRegistryHost = "${{ parameters.destinationRegistry }}"
           $liveRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $liveRegistryHost
@@ -290,9 +284,8 @@ stages:
       parameters:
         displayName: 'Pull and Repackage Vulnerable Chart'
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+        importHelmPipelineModule: true
         inlineScript: |
-          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
-
           # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
           $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
@@ -331,9 +324,8 @@ stages:
       parameters:
         displayName: 'Push Vulnerable Chart to Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
+        importHelmPipelineModule: true
         inlineScript: |
-          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
-
           # Extract registry name
           $preRegistryHost = "${{ parameters.preRegistry }}"
           $preRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $preRegistryHost
