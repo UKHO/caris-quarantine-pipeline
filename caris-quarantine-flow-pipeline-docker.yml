@@ -8,24 +8,9 @@ resources:
       filters:
         - path: target.mediaType
           value: "application/vnd.docker.distribution.manifest.v2+json"
-                  
 
 variables:
-  - group: caris-quarantine
-  - name: sourceRegistryServiceConnection
-    value: 'publiccrlive-docker'
-  - name: destinationRegistryServiceConnection
-    value: 'carisliveacr-docker'
-  - name: preRegistryServiceConnection
-    value: 'carispreacr-docker'
-  - name: destinationRegistry
-    value: 'carisliveacr.azurecr.io'
-  - name: preRegistry
-    value: 'carispreacr.azurecr.io'
-  - name: snykServiceConnection
-    value: 'SnykAuth'
-  - name: snykOrganization
-    value: 'caris-cloud'
+- template: templates/variables/shared-config.yml
 
 stages:
 - template: templates/container-scan-template.yml

@@ -33,19 +33,18 @@ stages:
       name: Tiberius
       demands:
       - ENVIRONMENT -equals BUS
+    variables:
+      sourceImage: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}'
     steps:
-    - task: Docker@2
-      displayName: 'Login to Source Registry'
-      inputs:
+    - template: steps/docker-login.yml
+      parameters:
+        displayName: 'Login to Source Registry'
         containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
-        command: 'login'
 
-    - task: PowerShell@2
-      displayName: 'Pull Published Image'
-      inputs:
-        targetType: 'inline'
-        script: |
-          docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
+    - template: steps/docker-pull.yml
+      parameters:
+        displayName: 'Pull Published Image'
+        imageName: '$(sourceImage)'
 
     - task: UkhoSnykScanTask@0
       displayName: 'Snyk container scan'
@@ -56,7 +55,7 @@ stages:
         testType: container
         monitorWhen: always
         severityThreshold: high
-        dockerImageName: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}'
+        dockerImageName: '$(sourceImage)'
 
 - stage: PushToPreACR
   displayName: 'Push scanned image to Pre ACR'
@@ -70,42 +69,33 @@ stages:
       demands:
       - ENVIRONMENT -equals ENG
     variables:
+      sourceImage: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}'
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       preImageRepository: 'scanned/${{ parameters.sourceRepository }}'
       fullPreImageName: '${{ parameters.preRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
     steps:
-    - task: Docker@2
-      displayName: 'Login to Source Registry'
-      inputs:
+    - template: steps/docker-login.yml
+      parameters:
+        displayName: 'Login to Source Registry'
         containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
-        command: 'login'
 
-    - task: PowerShell@2
-      displayName: 'Pull Published Image'
-      inputs:
-        targetType: 'inline'
-        script: |
-          docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
+    - template: steps/docker-pull.yml
+      parameters:
+        displayName: 'Pull Published Image'
+        imageName: '$(sourceImage)'
 
-    - task: Docker@2
-      displayName: 'Login to Pre Registry'
-      inputs:
+    - template: steps/docker-login.yml
+      parameters:
+        displayName: 'Login to Pre Registry'
         containerRegistry: '${{ parameters.preRegistryServiceConnection }}'
-        command: 'login'
 
-    - task: Docker@2
-      displayName: 'Tag Image for Pre'
-      inputs:
-        command: 'tag'
-        arguments: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} $(fullPreImageName)'
-
-    - task: Docker@2
-      displayName: 'Push Scanned Image to Pre Registry'
-      inputs:
-        containerRegistry: '${{ parameters.preRegistryServiceConnection }}'
-        repository: '$(preImageRepository)'
-        command: 'push'
-        tags: '$(scannedImageTag)'
+    - template: steps/docker-tag-push.yml
+      parameters:
+        sourceImage: '$(sourceImage)'
+        targetImage: '$(fullPreImageName)'
+        targetRegistry: '${{ parameters.preRegistryServiceConnection }}'
+        targetRepository: '$(preImageRepository)'
+        targetTag: '$(scannedImageTag)'
 
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Live ACR'
@@ -119,42 +109,34 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     variables:
+      sourceImage: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}'
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       destinationImageRepository: 'scanned/${{ parameters.sourceRepository }}'
       fullDestinationImageName: '${{ parameters.destinationRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
     steps:
-    - task: Docker@2
-      displayName: 'Login to Source Registry'
-      inputs:
+    - template: steps/docker-login.yml
+      parameters:
+        displayName: 'Login to Source Registry'
         containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
-        command: 'login'
 
-    - task: PowerShell@2
-      displayName: 'Pull Published Image'
-      inputs:
-        targetType: 'inline'
-        script: |
-          docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
+    - template: steps/docker-pull.yml
+      parameters:
+        displayName: 'Pull Published Image'
+        imageName: '$(sourceImage)'
 
-    - task: Docker@2
-      displayName: 'Login to Destination Registry'
-      inputs:
+    - template: steps/docker-login.yml
+      parameters:
+        displayName: 'Login to Destination Registry'
         containerRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
-        command: 'login'
 
-    - task: Docker@2
-      displayName: 'Tag Image as Snyk Scanned'
-      inputs:
-        command: 'tag'
-        arguments: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} $(fullDestinationImageName)'
-
-    - task: Docker@2
-      displayName: 'Push Scanned Image to Destination Registry'
-      inputs:
-        containerRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
-        repository: '$(destinationImageRepository)'
-        command: 'push'
-        tags: '$(scannedImageTag)'
+    - template: steps/docker-tag-push.yml
+      parameters:
+        sourceImage: '$(sourceImage)'
+        targetImage: '$(fullDestinationImageName)'
+        targetRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
+        targetRepository: '$(destinationImageRepository)'
+        targetTag: '$(scannedImageTag)'
+        displayNamePrefix: 'Snyk Scanned - '
 
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
@@ -165,28 +147,21 @@ stages:
     displayName: 'Send Success Alert to Teams Channel'
     pool: Mare Nectaris
     variables:
-      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       fullDestinationImageName: '${{ parameters.destinationRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
       fullPreImageName: '${{ parameters.preRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
     steps:
-    - task: PowerShell@2
-      displayName: 'Send Teams Alert'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $body = @{
-            title = "Container Scan Completed Successfully"
-            message = "Container scanning passed and image has been pushed to live and pre private registries."
-            status = "success"
-            sourceHost = "${{ parameters.sourceHost }}"
-            sourceRepository = "${{ parameters.sourceRepository }}"
-            sourceTag = "${{ parameters.sourceTag }}"
-            destinationImage = "$(fullDestinationImageName)"
-            preImage = "$(fullPreImageName)"
-            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-          } | ConvertTo-Json
-          
-          Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
+    - template: steps/send-teams-alert.yml
+      parameters:
+        webhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
+        title: 'Container Scan Completed Successfully'
+        message: 'Container scanning passed and image has been pushed to live and pre private registries.'
+        status: 'success'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        additionalFields:
+          destinationImage: '$(fullDestinationImageName)'
+          preImage: '$(fullPreImageName)'
 
 - stage: AlertOnFail
   displayName: 'Alert that vulnerable image present'
@@ -200,42 +175,34 @@ stages:
       demands:
       - ENVIRONMENT -equals ENG
     variables:
+      sourceImage: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}'
       vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
       preVulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
       fullPreVulnerableImageName: '${{ parameters.preRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
     steps:
-    - task: Docker@2
-      displayName: 'Login to Source Registry'
-      inputs:
+    - template: steps/docker-login.yml
+      parameters:
+        displayName: 'Login to Source Registry'
         containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
-        command: 'login'
 
-    - task: PowerShell@2
-      displayName: 'Pull Published Image'
-      inputs:
-        targetType: 'inline'
-        script: |
-          docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
+    - template: steps/docker-pull.yml
+      parameters:
+        displayName: 'Pull Published Image'
+        imageName: '$(sourceImage)'
 
-    - task: Docker@2
-      displayName: 'Login to Pre Registry'
-      inputs:
+    - template: steps/docker-login.yml
+      parameters:
+        displayName: 'Login to Pre Registry'
         containerRegistry: '${{ parameters.preRegistryServiceConnection }}'
-        command: 'login'
 
-    - task: Docker@2
-      displayName: 'Tag Image as Vulnerable for Pre'
-      inputs:
-        command: 'tag'
-        arguments: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} $(fullPreVulnerableImageName)'
-
-    - task: Docker@2
-      displayName: 'Push Vulnerable Image to Pre Registry'
-      inputs:
-        containerRegistry: '${{ parameters.preRegistryServiceConnection }}'
-        repository: '$(preVulnerableImageRepository)'
-        command: 'push'
-        tags: '$(vulnerableImageTag)'
+    - template: steps/docker-tag-push.yml
+      parameters:
+        sourceImage: '$(sourceImage)'
+        targetImage: '$(fullPreVulnerableImageName)'
+        targetRegistry: '${{ parameters.preRegistryServiceConnection }}'
+        targetRepository: '$(preVulnerableImageRepository)'
+        targetTag: '$(vulnerableImageTag)'
+        displayNamePrefix: 'Vulnerable - '
 
   - job: PushVulnerableImage
     displayName: 'Push Vulnerable Image to Live ACR'
@@ -245,42 +212,34 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     variables:
+      sourceImage: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}'
       vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
       vulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
       fullVulnerableImageName: '${{ parameters.destinationRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
     steps:
-    - task: Docker@2
-      displayName: 'Login to Source Registry'
-      inputs:
+    - template: steps/docker-login.yml
+      parameters:
+        displayName: 'Login to Source Registry'
         containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
-        command: 'login'
 
-    - task: PowerShell@2
-      displayName: 'Pull Published Image'
-      inputs:
-        targetType: 'inline'
-        script: |
-          docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
+    - template: steps/docker-pull.yml
+      parameters:
+        displayName: 'Pull Published Image'
+        imageName: '$(sourceImage)'
 
-    - task: Docker@2
-      displayName: 'Login to Destination Registry'
-      inputs:
+    - template: steps/docker-login.yml
+      parameters:
+        displayName: 'Login to Destination Registry'
         containerRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
-        command: 'login'
 
-    - task: Docker@2
-      displayName: 'Tag Image as Vulnerable'
-      inputs:
-        command: 'tag'
-        arguments: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} $(fullVulnerableImageName)'
-
-    - task: Docker@2
-      displayName: 'Push Vulnerable Image'
-      inputs:
-        containerRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
-        repository: '$(vulnerableImageRepository)'
-        command: 'push'
-        tags: '$(vulnerableImageTag)'
+    - template: steps/docker-tag-push.yml
+      parameters:
+        sourceImage: '$(sourceImage)'
+        targetImage: '$(fullVulnerableImageName)'
+        targetRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
+        targetRepository: '$(vulnerableImageRepository)'
+        targetTag: '$(vulnerableImageTag)'
+        displayNamePrefix: 'Vulnerable - '
 
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'
@@ -288,26 +247,19 @@ stages:
     condition: always()
     pool: Mare Nectaris
     variables:
-      vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
       fullVulnerableImageName: '${{ parameters.destinationRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
       fullPreVulnerableImageName: '${{ parameters.preRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
     steps:
-    - task: PowerShell@2
-      displayName: 'Send Teams Alert'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $body = @{
-            title = "Container Scan Failed"
-            message = "Container scanning failed due to vulnerabilities detected in image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}. Vulnerable images pushed to live and pre registries."
-            status = "failure"
-            sourceHost = "${{ parameters.sourceHost }}"
-            sourceRepository = "${{ parameters.sourceRepository }}"
-            sourceTag = "${{ parameters.sourceTag }}"
-            vulnerableImage = "$(fullVulnerableImageName)"
-            preVulnerableImage = "$(fullPreVulnerableImageName)"
-            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-          } | ConvertTo-Json
-          
-          Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
+    - template: steps/send-teams-alert.yml
+      parameters:
+        webhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
+        title: 'Container Scan Failed'
+        message: 'Container scanning failed due to vulnerabilities detected in image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}. Vulnerable images pushed to live and pre registries.'
+        status: 'failure'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        additionalFields:
+          vulnerableImage: '$(fullVulnerableImageName)'
+          preVulnerableImage: '$(fullPreVulnerableImageName)'
 

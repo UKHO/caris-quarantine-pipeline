@@ -13,48 +13,17 @@ parameters:
     default: false
 
 steps:
-- ${{ if ne(parameters.stepName, '') }}:
-  - ${{ if eq(parameters.importHelmPipelineModule, true) }}:
-    - task: AzureCLI@2
-      name: ${{ parameters.stepName }}
-      displayName: ${{ parameters.displayName }}
-      inputs:
-        azureSubscription: ${{ parameters.azureSubscription }}
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
+- task: AzureCLI@2
+  ${{ if ne(parameters.stepName, '') }}:
+    name: ${{ parameters.stepName }}
+  displayName: ${{ parameters.displayName }}
+  inputs:
+    azureSubscription: ${{ parameters.azureSubscription }}
+    scriptType: 'pscore'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      ${{ if eq(parameters.importHelmPipelineModule, true) }}:
+        Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
 
-          ${{ parameters.inlineScript }}
-  - ${{ if ne(parameters.importHelmPipelineModule, true) }}:
-    - task: AzureCLI@2
-      name: ${{ parameters.stepName }}
-      displayName: ${{ parameters.displayName }}
-      inputs:
-        azureSubscription: ${{ parameters.azureSubscription }}
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          ${{ parameters.inlineScript }}
-
-- ${{ if eq(parameters.stepName, '') }}:
-  - ${{ if eq(parameters.importHelmPipelineModule, true) }}:
-    - task: AzureCLI@2
-      displayName: ${{ parameters.displayName }}
-      inputs:
-        azureSubscription: ${{ parameters.azureSubscription }}
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          Import-Module "$(Build.SourcesDirectory)/scripts/helm/HelmPipeline.psd1" -Force
-
-          ${{ parameters.inlineScript }}
-  - ${{ if ne(parameters.importHelmPipelineModule, true) }}:
-    - task: AzureCLI@2
-      displayName: ${{ parameters.displayName }}
-      inputs:
-        azureSubscription: ${{ parameters.azureSubscription }}
-        scriptType: 'pscore'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          ${{ parameters.inlineScript }}
+      ${{ end }}
+      ${{ parameters.inlineScript }}

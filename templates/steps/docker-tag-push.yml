@@ -1,0 +1,29 @@
+parameters:
+  - name: sourceImage
+    type: string
+  - name: targetImage
+    type: string
+  - name: targetRegistry
+    type: string
+  - name: targetRepository
+    type: string
+  - name: targetTag
+    type: string
+  - name: displayNamePrefix
+    type: string
+    default: ''
+
+steps:
+- task: Docker@2
+  displayName: '${{ parameters.displayNamePrefix }}Tag Image'
+  inputs:
+    command: 'tag'
+    arguments: '${{ parameters.sourceImage }} ${{ parameters.targetImage }}'
+
+- task: Docker@2
+  displayName: '${{ parameters.displayNamePrefix }}Push Image'
+  inputs:
+    containerRegistry: ${{ parameters.targetRegistry }}
+    repository: ${{ parameters.targetRepository }}
+    command: 'push'
+    tags: ${{ parameters.targetTag }}

@@ -1,0 +1,48 @@
+parameters:
+  - name: webhookEndpoint
+    type: string
+  - name: title
+    type: string
+  - name: message
+    type: string
+  - name: status
+    type: string
+  - name: sourceHost
+    type: string
+  - name: sourceRepository
+    type: string
+  - name: sourceTag
+    type: string
+    default: ''
+  - name: additionalFields
+    type: object
+    default: {}
+  - name: displayName
+    type: string
+    default: 'Send Teams Alert'
+
+steps:
+- task: PowerShell@2
+  displayName: ${{ parameters.displayName }}
+  inputs:
+    targetType: 'inline'
+    script: |
+      $body = @{
+        title = "${{ parameters.title }}"
+        message = "${{ parameters.message }}"
+        status = "${{ parameters.status }}"
+        sourceHost = "${{ parameters.sourceHost }}"
+        sourceRepository = "${{ parameters.sourceRepository }}"
+        pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+      }
+      
+      ${{ if ne(parameters.sourceTag, '') }}:
+        $body["sourceTag"] = "${{ parameters.sourceTag }}"
+      ${{ end }}
+      
+      ${{ each field in parameters.additionalFields }}:
+        $body["${{ field.key }}"] = "${{ field.value }}"
+      ${{ end }}
+      
+      $json = $body | ConvertTo-Json
+      Invoke-RestMethod -Uri "${{ parameters.webhookEndpoint }}" -Method Post -Body $json -ContentType 'application/json'
