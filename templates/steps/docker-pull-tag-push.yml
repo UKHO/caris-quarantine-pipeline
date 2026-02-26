@@ -1,9 +1,11 @@
 parameters:
+  - name: sourceRegistry
+    type: string
   - name: sourceImage
     type: string
-  - name: targetImage
-    type: string
   - name: targetRegistry
+    type: string
+  - name: targetImage
     type: string
   - name: targetRepository
     type: string
@@ -14,6 +16,24 @@ parameters:
     default: ''
 
 steps:
+- task: Docker@2
+  displayName: '${{ parameters.displayNamePrefix }}Login to Source Registry'
+  inputs:
+    containerRegistry: ${{ parameters.sourceRegistry }}
+    command: 'login'
+
+- task: PowerShell@2
+  displayName: '${{ parameters.displayNamePrefix }}Pull Image'
+  inputs:
+    targetType: 'inline'
+    script: docker pull ${{ parameters.sourceImage }}
+
+- task: Docker@2
+  displayName: '${{ parameters.displayNamePrefix }}Login to Target Registry'
+  inputs:
+    containerRegistry: ${{ parameters.targetRegistry }}
+    command: 'login'
+
 - task: Docker@2
   displayName: '${{ parameters.displayNamePrefix }}Tag Image'
   inputs:

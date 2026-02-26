@@ -36,15 +36,17 @@ stages:
     variables:
       sourceImage: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}'
     steps:
-    - template: steps/docker-login.yml
-      parameters:
-        displayName: 'Login to Source Registry'
+    - task: Docker@2
+      displayName: 'Login to Source Registry'
+      inputs:
         containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
+        command: 'login'
 
-    - template: steps/docker-pull.yml
-      parameters:
-        displayName: 'Pull Published Image'
-        imageName: '$(sourceImage)'
+    - task: PowerShell@2
+      displayName: 'Pull Published Image'
+      inputs:
+        targetType: 'inline'
+        script: docker pull $(sourceImage)
 
     - task: UkhoSnykScanTask@0
       displayName: 'Snyk container scan'
@@ -74,26 +76,12 @@ stages:
       preImageRepository: 'scanned/${{ parameters.sourceRepository }}'
       fullPreImageName: '${{ parameters.preRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
     steps:
-    - template: steps/docker-login.yml
+    - template: steps/docker-pull-tag-push.yml
       parameters:
-        displayName: 'Login to Source Registry'
-        containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
-
-    - template: steps/docker-pull.yml
-      parameters:
-        displayName: 'Pull Published Image'
-        imageName: '$(sourceImage)'
-
-    - template: steps/docker-login.yml
-      parameters:
-        displayName: 'Login to Pre Registry'
-        containerRegistry: '${{ parameters.preRegistryServiceConnection }}'
-
-    - template: steps/docker-tag-push.yml
-      parameters:
+        sourceRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
         sourceImage: '$(sourceImage)'
-        targetImage: '$(fullPreImageName)'
         targetRegistry: '${{ parameters.preRegistryServiceConnection }}'
+        targetImage: '$(fullPreImageName)'
         targetRepository: '$(preImageRepository)'
         targetTag: '$(scannedImageTag)'
 
@@ -114,29 +102,15 @@ stages:
       destinationImageRepository: 'scanned/${{ parameters.sourceRepository }}'
       fullDestinationImageName: '${{ parameters.destinationRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
     steps:
-    - template: steps/docker-login.yml
+    - template: steps/docker-pull-tag-push.yml
       parameters:
-        displayName: 'Login to Source Registry'
-        containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
-
-    - template: steps/docker-pull.yml
-      parameters:
-        displayName: 'Pull Published Image'
-        imageName: '$(sourceImage)'
-
-    - template: steps/docker-login.yml
-      parameters:
-        displayName: 'Login to Destination Registry'
-        containerRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
-
-    - template: steps/docker-tag-push.yml
-      parameters:
+        sourceRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
         sourceImage: '$(sourceImage)'
-        targetImage: '$(fullDestinationImageName)'
         targetRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
+        targetImage: '$(fullDestinationImageName)'
         targetRepository: '$(destinationImageRepository)'
         targetTag: '$(scannedImageTag)'
-        displayNamePrefix: 'Snyk Scanned - '
+        displayNamePrefix: 'Scanned - '
 
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
@@ -180,26 +154,12 @@ stages:
       preVulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
       fullPreVulnerableImageName: '${{ parameters.preRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
     steps:
-    - template: steps/docker-login.yml
+    - template: steps/docker-pull-tag-push.yml
       parameters:
-        displayName: 'Login to Source Registry'
-        containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
-
-    - template: steps/docker-pull.yml
-      parameters:
-        displayName: 'Pull Published Image'
-        imageName: '$(sourceImage)'
-
-    - template: steps/docker-login.yml
-      parameters:
-        displayName: 'Login to Pre Registry'
-        containerRegistry: '${{ parameters.preRegistryServiceConnection }}'
-
-    - template: steps/docker-tag-push.yml
-      parameters:
+        sourceRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
         sourceImage: '$(sourceImage)'
-        targetImage: '$(fullPreVulnerableImageName)'
         targetRegistry: '${{ parameters.preRegistryServiceConnection }}'
+        targetImage: '$(fullPreVulnerableImageName)'
         targetRepository: '$(preVulnerableImageRepository)'
         targetTag: '$(vulnerableImageTag)'
         displayNamePrefix: 'Vulnerable - '
@@ -217,26 +177,12 @@ stages:
       vulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
       fullVulnerableImageName: '${{ parameters.destinationRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
     steps:
-    - template: steps/docker-login.yml
+    - template: steps/docker-pull-tag-push.yml
       parameters:
-        displayName: 'Login to Source Registry'
-        containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
-
-    - template: steps/docker-pull.yml
-      parameters:
-        displayName: 'Pull Published Image'
-        imageName: '$(sourceImage)'
-
-    - template: steps/docker-login.yml
-      parameters:
-        displayName: 'Login to Destination Registry'
-        containerRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
-
-    - template: steps/docker-tag-push.yml
-      parameters:
+        sourceRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
         sourceImage: '$(sourceImage)'
-        targetImage: '$(fullVulnerableImageName)'
         targetRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
+        targetImage: '$(fullVulnerableImageName)'
         targetRepository: '$(vulnerableImageRepository)'
         targetTag: '$(vulnerableImageTag)'
         displayNamePrefix: 'Vulnerable - '
