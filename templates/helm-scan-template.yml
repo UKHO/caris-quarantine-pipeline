@@ -92,8 +92,13 @@ stages:
         script: |
           $chartPath = '$(helmChartPath)'
           $jobStatus = '$(Agent.JobStatus)'
+          $hasResolvedChartPath = -not [string]::IsNullOrWhiteSpace($chartPath) -and ($chartPath -notmatch '^\$\(.+\)$')
 
-          if ([string]::IsNullOrWhiteSpace($chartPath)) {
+          if (-not $hasResolvedChartPath) {
+            # If the variable token is unresolved, an earlier step failed before scan input was prepared.
+            $scanOutcome = 'error'
+          }
+          elseif (-not (Test-Path -LiteralPath $chartPath)) {
             $scanOutcome = 'error'
           }
           elseif ($jobStatus -in @('Failed', 'SucceededWithIssues')) {
