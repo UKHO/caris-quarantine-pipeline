@@ -72,6 +72,7 @@ stages:
           Write-Host "Helm chart extracted to: $($extractedChart.FullName)"
 
     - task: UkhoSnykScanTask@0
+      name: snykHelmScan
       displayName: 'Snyk IaC scan for Helm Chart'
       inputs:
         failOnIssues: true
@@ -82,10 +83,37 @@ stages:
         severityThreshold: high
         targetFile: '$(helmChartPath)'
 
+    - task: PowerShell@2
+      name: setHelmScanOutcome
+      displayName: 'Set Helm scan outcome'
+      condition: always()
+      inputs:
+        targetType: 'inline'
+        script: |
+          $chartPath = '$(helmChartPath)'
+          $jobStatus = '$(Agent.JobStatus)'
+
+          if ([string]::IsNullOrWhiteSpace($chartPath)) {
+            $scanOutcome = 'error'
+          }
+          elseif ($jobStatus -in @('Failed', 'SucceededWithIssues')) {
+            $scanOutcome = 'vulnerable'
+          }
+          elseif ($jobStatus -eq 'Succeeded') {
+            $scanOutcome = 'clean'
+          }
+          else {
+            $scanOutcome = 'error'
+          }
+
+          Write-Host "Helm scan job status: $jobStatus"
+          Write-Host "Helm scan outcome: $scanOutcome"
+          Write-Host "##vso[task.setvariable variable=helmScanOutcome;isOutput=true]$scanOutcome"
+
 - stage: PushHelmToPreACR
   displayName: 'Push scanned Helm chart to Pre ACR'
   dependsOn: ScanHelmChart
-  condition: succeeded('ScanHelmChart')
+  condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'clean')
   jobs:
   - job: PushHelmToPre
     displayName: 'Push Helm Chart to Pre ACR'
@@ -233,7 +261,7 @@ stages:
 - stage: AlertOnHelmFail
   displayName: 'Alert that vulnerable Helm chart present'
   dependsOn: ScanHelmChart
-  condition: failed('ScanHelmChart')
+  condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'vulnerable')
   jobs:
   - job: PushPreVulnerableHelmChart
     displayName: 'Push Vulnerable Helm Chart to Pre vulnerable namespace'
