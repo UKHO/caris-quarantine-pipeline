@@ -10,27 +10,13 @@ resources:
           value: "application/vnd.oci.image.manifest.v1+json"
 
 variables:
-  - group: caris-quarantine
   - name: sourceAzureSubscription
     value: 'quarantine-helm-publicacr'
   - name: preAzureSubscription
     value: 'quarantine-helm-preacr'
   - name: liveAzureSubscription
     value: 'quarantine-helm-liveacr'
-  - name: sourceRegistryServiceConnection
-    value: 'publiccrlive-docker' 
-  - name: destinationRegistryServiceConnection
-    value: 'carisliveacr-docker'
-  - name: preRegistryServiceConnection
-    value: 'carispreacr-docker'
-  - name: destinationRegistry
-    value: 'carisliveacr.azurecr.io'
-  - name: preRegistry
-    value: 'carispreacr.azurecr.io'
-  - name: snykServiceConnection
-    value: 'SnykAuth'
-  - name: snykOrganization
-    value: 'caris-cloud'
+  - template: templates/common-variables.yml
 
 stages:
 - template: templates/helm-scan-template.yml

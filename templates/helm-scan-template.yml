@@ -217,23 +217,18 @@ stages:
     displayName: 'Send Helm Success Alert to Teams Channel'
     pool: Mare Nectaris
     steps:
-    - task: PowerShell@2
-      displayName: 'Send Teams Alert'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $body = @{
-            title = "Helm Chart Scan Completed Successfully"
-            message = "Helm chart scanning passed and chart has been pushed to live and pre private registries."
-            status = "success"
-            sourceHost = "${{ parameters.sourceHost }}"
-            sourceRepository = "${{ parameters.sourceRepository }}"
-            destinationRegistry = "${{ parameters.destinationRegistry }}"
-            preRegistry = "${{ parameters.preRegistry }}"
-            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-          } | ConvertTo-Json
-          
-          Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
+    - template: steps/send-teams-alert.yml
+      parameters:
+        teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
+        payload:
+          title: 'Helm Chart Scan Completed Successfully'
+          message: 'Helm chart scanning passed and chart has been pushed to live and pre private registries.'
+          status: 'success'
+          sourceHost: '${{ parameters.sourceHost }}'
+          sourceRepository: '${{ parameters.sourceRepository }}'
+          destinationRegistry: '${{ parameters.destinationRegistry }}'
+          preRegistry: '${{ parameters.preRegistry }}'
+          pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
 
 - stage: AlertOnHelmFail
   displayName: 'Alert that vulnerable Helm chart present'
@@ -295,20 +290,15 @@ stages:
     condition: always()
     pool: Mare Nectaris
     steps:
-    - task: PowerShell@2
-      displayName: 'Send Teams Alert'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $body = @{
-            title = "Helm Chart Scan Failed"
-            message = "Helm chart scanning failed due to vulnerabilities detected in chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}. Vulnerable chart pushed to pre registry."
-            status = "failure"
-            sourceHost = "${{ parameters.sourceHost }}"
-            sourceRepository = "${{ parameters.sourceRepository }}"
-            preRegistry = "${{ parameters.preRegistry }}"
-            vulnerableRepository = "vulnerable/${{ parameters.sourceRepository }}"
-            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-          } | ConvertTo-Json
-          
-          Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
+    - template: steps/send-teams-alert.yml
+      parameters:
+        teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
+        payload:
+          title: 'Helm Chart Scan Failed'
+          message: 'Helm chart scanning failed due to vulnerabilities detected in chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}. Vulnerable chart pushed to pre registry.'
+          status: 'failure'
+          sourceHost: '${{ parameters.sourceHost }}'
+          sourceRepository: '${{ parameters.sourceRepository }}'
+          preRegistry: '${{ parameters.preRegistry }}'
+          vulnerableRepository: 'vulnerable/${{ parameters.sourceRepository }}'
+          pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'

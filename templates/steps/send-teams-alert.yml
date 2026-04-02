@@ -1,0 +1,21 @@
+parameters:
+  - name: displayName
+    type: string
+    default: 'Send Teams Alert'
+  - name: teamsWebhookEndpoint
+    type: string
+  - name: payload
+    type: object
+    default: {}
+
+steps:
+- task: PowerShell@2
+  displayName: '${{ parameters.displayName }}'
+  inputs:
+    targetType: 'inline'
+    script: |
+      $body = @'
+      ${{ convertToJson(parameters.payload) }}
+      '@
+
+      Invoke-RestMethod -Uri '${{ parameters.teamsWebhookEndpoint }}' -Method Post -Body $body -ContentType 'application/json'
