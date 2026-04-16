@@ -41,7 +41,7 @@ stages:
       - ENVIRONMENT -equals BUS
     steps:
     - powershell: |
-        $name = "${{ parameters.sourceRepository }}".Replace("/", "-") + ":${{ parameters.sourceTag }}"
+        $name = "${{ parameters.sourceRepository }}".Replace("/", "-") + " ${{ parameters.sourceTag }}"
         Write-Host "##vso[build.updatebuildnumber]$name"
       displayName: 'Set pipeline run name'
 
