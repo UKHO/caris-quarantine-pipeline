@@ -46,6 +46,15 @@ stages:
         command: 'login'
 
     - task: PowerShell@2
+      displayName: 'Debug - Show Docker auth hosts'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $config = Get-Content "$env:USERPROFILE\.docker\config.json" | ConvertFrom-Json
+          Write-Host "Logged-in hosts: $($config.auths.PSObject.Properties.Name -join ', ')"
+          Write-Host "sourceHost: ${{ parameters.sourceHost }}"
+
+    - task: PowerShell@2
       displayName: 'Pull Published Image'
       inputs:
         targetType: 'inline'
