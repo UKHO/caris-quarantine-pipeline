@@ -40,6 +40,9 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     steps:
+    - script: echo "##vso[build.updatebuildnumber]${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
+      displayName: 'Set pipeline run name'
+
     - template: steps/azurecli-pscore.yml
       parameters:
         displayName: 'Login to ACR and Pull Helm Chart'
