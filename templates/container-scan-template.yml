@@ -50,7 +50,8 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          $config = Get-Content "$env:USERPROFILE\.docker\config.json" | ConvertFrom-Json
+          $dockerConfigPath = if ($env:USERPROFILE) { "$env:USERPROFILE/.docker/config.json" } else { "$env:HOME/.docker/config.json" }
+          $config = Get-Content $dockerConfigPath | ConvertFrom-Json
           Write-Host "Logged-in hosts: $($config.auths.PSObject.Properties.Name -join ', ')"
           Write-Host "sourceHost: ${{ parameters.sourceHost }}"
 
