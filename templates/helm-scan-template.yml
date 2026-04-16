@@ -41,9 +41,15 @@ stages:
       - ENVIRONMENT -equals BUS
     steps:
     - powershell: |
-        $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) ${{ parameters.sourceTag }}"
+        $repo = '${{ parameters.sourceRepository }}'
+        if (-not $repo.StartsWith('caris/charts/')) {
+          Write-Host "Repository '$repo' is not a Helm chart (expected caris/charts/*). Skipping."
+          Write-Host "##vso[task.complete result=Skipped;]Not a Helm chart repository"
+          exit 0
+        }
+        $name = "$(Build.BuildNumber) $($repo.Replace('/', '-')) ${{ parameters.sourceTag }}"
         Write-Host "##vso[build.updatebuildnumber]$name"
-      displayName: 'Set pipeline run name'
+      displayName: 'Validate repository and set pipeline run name'
 
     - template: steps/azurecli-pscore.yml
       parameters:
