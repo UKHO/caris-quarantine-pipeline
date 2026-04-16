@@ -40,7 +40,9 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     steps:
-    - script: echo "##vso[build.updatebuildnumber]${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
+    - powershell: |
+        $name = "${{ parameters.sourceRepository }}".Replace("/", "-") + ":${{ parameters.sourceTag }}"
+        Write-Host "##vso[build.updatebuildnumber]$name"
       displayName: 'Set pipeline run name'
 
     - template: steps/azurecli-pscore.yml
