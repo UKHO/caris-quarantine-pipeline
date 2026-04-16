@@ -34,6 +34,9 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     steps:
+    - script: echo "##vso[build.updatebuildnumber]${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
+      displayName: 'Set pipeline run name'
+
     - task: Docker@2
       displayName: 'Login to Source Registry'
       inputs:
