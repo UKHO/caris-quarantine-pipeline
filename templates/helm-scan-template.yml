@@ -35,21 +35,16 @@ stages:
   jobs:
   - job: HelmChartScan
     displayName: 'Scan Pushed Helm Chart'
+    condition: startsWith('${{ parameters.sourceRepository }}', 'caris/charts/')
     pool:
       name: Tiberius
       demands:
       - ENVIRONMENT -equals BUS
     steps:
     - powershell: |
-        $repo = '${{ parameters.sourceRepository }}'
-        if (-not $repo.StartsWith('caris/charts/')) {
-          Write-Host "Repository '$repo' is not a Helm chart (expected caris/charts/*). Skipping."
-          Write-Host "##vso[task.complete result=Skipped;]Not a Helm chart repository"
-          exit 0
-        }
-        $name = "$(Build.BuildNumber) $($repo.Replace('/', '-')) ${{ parameters.sourceTag }}"
+        $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) ${{ parameters.sourceTag }}"
         Write-Host "##vso[build.updatebuildnumber]$name"
-      displayName: 'Validate repository and set pipeline run name'
+      displayName: 'Set pipeline run name'
 
     - template: steps/azurecli-pscore.yml
       parameters:
