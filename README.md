@@ -81,11 +81,13 @@ Additional variables this pipeline expects (see `caris-quarantine-flow-pipeline-
    - Azure subscriptions for Helm interactions (`quarantine-helm-publicacr`, `quarantine-helm-preacr`, `quarantine-helm-liveacr` in our environment).
    - `SnykAuth` for Snyk scanning.
    - `AcrWebhookConnection` for the shared webhook resource.
+   - Docker registry service connections in Azure DevOps are configured as **Azure Container Registry - Workload Identity Federation** connections
 2. **Pipelines**
    - Create two Azure DevOps pipeline definitions pointing to `caris-quarantine-flow-pipeline-docker.yml` and `caris-quarantine-flow-pipeline-oci.yml` on the same branch.
 3. **Permissions**
    - Ensure the Docker service principals have AcrPull (source) and AcrPush (Pre/Live) as appropriate.
    - Grant the Helm Azure subscriptions AcrPull/AcrPush on their respective registries.
+   - Ensure identities used by the Docker workload identity federation service connections have AcrPull (source) and AcrPush (Pre/Live) as appropriate.
 4. **Extensions**
    - Install UkhoSnykScanTask (or equivalent) in your organization.
 5. **Webhook**
