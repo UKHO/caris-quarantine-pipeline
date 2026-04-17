@@ -35,11 +35,17 @@ stages:
   jobs:
   - job: HelmChartScan
     displayName: 'Scan Pushed Helm Chart'
+    condition: startsWith('${{ parameters.sourceRepository }}', 'caris/charts/')
     pool:
       name: Tiberius
       demands:
       - ENVIRONMENT -equals BUS
     steps:
+    - powershell: |
+        $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) ${{ parameters.sourceTag }}"
+        Write-Host "##vso[build.updatebuildnumber]$name"
+      displayName: 'Set pipeline run name'
+
     - template: steps/azurecli-pscore.yml
       parameters:
         displayName: 'Login to ACR and Pull Helm Chart'
@@ -72,6 +78,7 @@ stages:
           Write-Host "Helm chart extracted to: $($extractedChart.FullName)"
 
     - task: UkhoSnykScanTask@0
+      name: snykHelmScan
       displayName: 'Snyk IaC scan for Helm Chart'
       inputs:
         failOnIssues: true
@@ -82,10 +89,42 @@ stages:
         severityThreshold: high
         targetFile: '$(helmChartPath)'
 
+    - task: PowerShell@2
+      name: setHelmScanOutcome
+      displayName: 'Set Helm scan outcome'
+      condition: always()
+      inputs:
+        targetType: 'inline'
+        script: |
+          $chartPath = '$(helmChartPath)'
+          $jobStatus = '$(Agent.JobStatus)'
+          $hasResolvedChartPath = -not [string]::IsNullOrWhiteSpace($chartPath) -and ($chartPath -notmatch '^\$\(.+\)$')
+
+          if (-not $hasResolvedChartPath) {
+            # If the variable token is unresolved, an earlier step failed before scan input was prepared.
+            $scanOutcome = 'error'
+          }
+          elseif (-not (Test-Path -LiteralPath $chartPath)) {
+            $scanOutcome = 'error'
+          }
+          elseif ($jobStatus -in @('Failed', 'SucceededWithIssues')) {
+            $scanOutcome = 'vulnerable'
+          }
+          elseif ($jobStatus -eq 'Succeeded') {
+            $scanOutcome = 'clean'
+          }
+          else {
+            $scanOutcome = 'error'
+          }
+
+          Write-Host "Helm scan job status: $jobStatus"
+          Write-Host "Helm scan outcome: $scanOutcome"
+          Write-Host "##vso[task.setvariable variable=helmScanOutcome;isOutput=true]$scanOutcome"
+
 - stage: PushHelmToPreACR
   displayName: 'Push scanned Helm chart to Pre ACR'
   dependsOn: ScanHelmChart
-  condition: succeeded('ScanHelmChart')
+  condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'clean')
   jobs:
   - job: PushHelmToPre
     displayName: 'Push Helm Chart to Pre ACR'
@@ -217,28 +256,23 @@ stages:
     displayName: 'Send Helm Success Alert to Teams Channel'
     pool: Mare Nectaris
     steps:
-    - task: PowerShell@2
-      displayName: 'Send Teams Alert'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $body = @{
-            title = "Helm Chart Scan Completed Successfully"
-            message = "Helm chart scanning passed and chart has been pushed to live and pre private registries."
-            status = "success"
-            sourceHost = "${{ parameters.sourceHost }}"
-            sourceRepository = "${{ parameters.sourceRepository }}"
-            destinationRegistry = "${{ parameters.destinationRegistry }}"
-            preRegistry = "${{ parameters.preRegistry }}"
-            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-          } | ConvertTo-Json
-          
-          Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
+    - template: steps/send-teams-alert.yml
+      parameters:
+        teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
+        payload:
+          title: 'Helm Chart Scan Completed Successfully'
+          message: 'Helm chart scanning passed and chart has been pushed to live and pre private registries.'
+          status: 'success'
+          sourceHost: '${{ parameters.sourceHost }}'
+          sourceRepository: '${{ parameters.sourceRepository }}'
+          destinationRegistry: '${{ parameters.destinationRegistry }}'
+          preRegistry: '${{ parameters.preRegistry }}'
+          pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
 
 - stage: AlertOnHelmFail
   displayName: 'Alert that vulnerable Helm chart present'
   dependsOn: ScanHelmChart
-  condition: failed('ScanHelmChart')
+  condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'vulnerable')
   jobs:
   - job: PushPreVulnerableHelmChart
     displayName: 'Push Vulnerable Helm Chart to Pre vulnerable namespace'
@@ -295,20 +329,15 @@ stages:
     condition: always()
     pool: Mare Nectaris
     steps:
-    - task: PowerShell@2
-      displayName: 'Send Teams Alert'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $body = @{
-            title = "Helm Chart Scan Failed"
-            message = "Helm chart scanning failed due to vulnerabilities detected in chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}. Vulnerable chart pushed to pre registry."
-            status = "failure"
-            sourceHost = "${{ parameters.sourceHost }}"
-            sourceRepository = "${{ parameters.sourceRepository }}"
-            preRegistry = "${{ parameters.preRegistry }}"
-            vulnerableRepository = "vulnerable/${{ parameters.sourceRepository }}"
-            pipelineUrl = "$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
-          } | ConvertTo-Json
-          
-          Invoke-RestMethod -Uri "${{ parameters.teamsWebhookEndpoint }}" -Method Post -Body $body -ContentType 'application/json'
+    - template: steps/send-teams-alert.yml
+      parameters:
+        teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
+        payload:
+          title: 'Helm Chart Scan Failed'
+          message: 'Helm chart scanning failed due to vulnerabilities detected in chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}. Vulnerable chart pushed to pre registry.'
+          status: 'failure'
+          sourceHost: '${{ parameters.sourceHost }}'
+          sourceRepository: '${{ parameters.sourceRepository }}'
+          preRegistry: '${{ parameters.preRegistry }}'
+          vulnerableRepository: 'vulnerable/${{ parameters.sourceRepository }}'
+          pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'

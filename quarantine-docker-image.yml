@@ -1,0 +1,29 @@
+trigger: none
+pr: none
+
+resources:
+  webhooks:
+    - webhook: AcrWebhookTrigger
+      connection: AcrWebhookConnection
+      filters:
+        - path: target.mediaType
+          value: "application/vnd.docker.distribution.manifest.v2+json"
+                  
+
+variables:
+  - template: templates/common-variables.yml
+
+stages:
+- template: templates/container-scan-template.yml
+  parameters:
+    sourceRegistryServiceConnection: '$(sourceRegistryServiceConnection)'
+    destinationRegistryServiceConnection: '$(destinationRegistryServiceConnection)'
+    preRegistryServiceConnection: '$(preRegistryServiceConnection)'
+    destinationRegistry: '$(destinationRegistry)'
+    preRegistry: '$(preRegistry)'
+    snykServiceConnection: '$(snykServiceConnection)'
+    snykOrganization: '$(snykOrganization)'
+    teamsWebhookEndpoint: '$(teamsWebhookEndpoint)'
+    sourceRepository: ${{ parameters.AcrWebhookTrigger.target.repository }}
+    sourceTag: ${{ parameters.AcrWebhookTrigger.target.tag }}
+    sourceHost: ${{ parameters.AcrWebhookTrigger.request.host }}
