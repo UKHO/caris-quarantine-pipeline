@@ -8,6 +8,8 @@ This repository contains two Azure DevOps pipelines that quarantine artifacts pu
 
 Both pipelines share the same webhook resource (`AcrWebhookTrigger`) but use manifest-type filters so only the relevant definition runs any stages.
 
+> **Note on hardened images:** The ACR webhook fires for every push to `publiccrlive`, including imports of hardened Docker images (e.g. `dhi/prometheus-operator`). The Helm pipeline guards against processing these by applying a **job-level condition** (`startsWith('caris/charts/', ...)`) in `helm-scan-template.yml` — the entire job is skipped for any repository that is not under `caris/charts/`. A step-level early-exit is insufficient because subsequent steps still execute after `exit 0` within a step.
+
 ## High-level behavior
 - Listens for ACR webhook pushes (Docker and Helm/OCI) and extracts repository, tag, and registry host from the payload.
 - Pulls the referenced artifact and runs the appropriate Snyk scan (container or IaC).
@@ -121,5 +123,7 @@ Additional variables this pipeline expects (see `caris-quarantine-flow-pipeline-
 ## Validation tips
 - Push a Docker image with media type `application/vnd.docker.distribution.manifest.v2+json` and confirm only the Docker pipeline executes the container template.
 - Push a Helm chart (OCI artifact) and confirm the OCI pipeline runs the Helm template, rewrites the chart version, and pushes to both Pre and Live.
+- Push a hardened image via the bootstrap import pipeline and confirm the Helm quarantine pipeline run shows the `HelmChartScan` job as **Skipped** (not failed).
+- Re-run the bootstrap import pipeline for an already-imported image and confirm the quarantine pipeline is **not triggered** (no new push, no webhook).
 - Review the Teams alerts to ensure they reference the correct registry hostnames and repositories.
 
