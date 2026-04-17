@@ -46,23 +46,6 @@ stages:
         command: 'login'
 
     - task: PowerShell@2
-      displayName: 'Debug - Show Docker auth hosts'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $dockerConfigPath = if ($env:USERPROFILE) { "$env:USERPROFILE/.docker/config.json" } else { "$env:HOME/.docker/config.json" }
-          $config = Get-Content $dockerConfigPath | ConvertFrom-Json
-          $loggedInHosts = $config.auths.PSObject.Properties.Name
-          $sourceHost = "${{ parameters.sourceHost }}"
-          Write-Host "Logged-in hosts: $($loggedInHosts -join ', ')"
-          Write-Host "sourceHost: $sourceHost"
-          if ($loggedInHosts -contains $sourceHost) {
-            Write-Host "##[section]Host match confirmed: '$sourceHost' is in logged-in hosts"
-          } else {
-            Write-Host "##[error]Host mismatch: '$sourceHost' was not found in logged-in hosts ($($loggedInHosts -join ', '))"
-          }
-
-    - task: PowerShell@2
       displayName: 'Pull Published Image'
       inputs:
         targetType: 'inline'
