@@ -77,6 +77,48 @@ stages:
           Write-Host "##vso[task.setvariable variable=helmChartPath]$($extractedChart.FullName)"
           Write-Host "Helm chart extracted to: $($extractedChart.FullName)"
 
+    - template: steps/azurecli-pscore.yml
+      parameters:
+        stepName: checkPreviousStatus
+        displayName: 'Check previous scan status'
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        importHelmPipelineModule: true
+        inlineScript: |
+          $chartVersion = '$(helmChartVersion)'
+          $chartName = "${{ parameters.sourceRepository }}" -split '/' | Select-Object -Last 1
+          $preRegistryName = Get-AcrRegistryNameFromHost -RegistryHost "${{ parameters.preRegistry }}"
+
+          $previousStatus = 'new'
+
+          # Check scanned namespace for this version
+          try {
+            $scannedRepo = "scanned/charts/$chartName"
+            $tags = az acr repository show-tags --name $preRegistryName --repository $scannedRepo -o json 2>$null | ConvertFrom-Json
+            $scannedTag = "$chartVersion-snyk-scanned"
+            if ($tags -contains $scannedTag) {
+              $previousStatus = 'clean'
+              Write-Host "Found existing scanned chart: ${scannedRepo}:$scannedTag"
+            }
+          } catch {
+            Write-Host "No scanned chart found"
+          }
+
+          # Check vulnerable namespace for this version
+          try {
+            $vulnerableRepo = "vulnerable/${{ parameters.sourceRepository }}"
+            $tags = az acr repository show-tags --name $preRegistryName --repository $vulnerableRepo -o json 2>$null | ConvertFrom-Json
+            $vulnerableTag = "$chartVersion-vulnerable"
+            if ($tags -contains $vulnerableTag) {
+              $previousStatus = 'vulnerable'
+              Write-Host "Found existing vulnerable chart: ${vulnerableRepo}:$vulnerableTag"
+            }
+          } catch {
+            Write-Host "No vulnerable chart found"
+          }
+
+          Write-Host "Previous scan status: $previousStatus"
+          Write-Host "##vso[task.setvariable variable=previousStatus;isOutput=true]$previousStatus"
+
     - task: UkhoSnykScanTask@0
       name: snykHelmScan
       displayName: 'Snyk IaC scan for Helm Chart'
@@ -249,12 +291,15 @@ stages:
 
 - stage: AlertOnHelmSuccess
   displayName: 'Alert that Helm scan completed successfully'
-  dependsOn: [PushHelmToPreACR, PushHelmToPrivateRepo]
+  dependsOn: [ScanHelmChart, PushHelmToPreACR, PushHelmToPrivateRepo]
   condition: and(succeeded('PushHelmToPreACR'), succeeded('PushHelmToPrivateRepo'))
   jobs:
   - job: SendHelmSuccessTeamsMessage
     displayName: 'Send Helm Success Alert to Teams Channel'
+    condition: ne(stageDependencies.ScanHelmChart.HelmChartScan.outputs['checkPreviousStatus.previousStatus'], 'clean')
     pool: Mare Nectaris
+    variables:
+      previousStatus: $[ stageDependencies.ScanHelmChart.HelmChartScan.outputs['checkPreviousStatus.previousStatus'] ]
     steps:
     - template: steps/send-teams-alert.yml
       parameters:
@@ -263,6 +308,7 @@ stages:
           title: 'Helm Chart Scan Completed Successfully'
           message: 'Helm chart scanning passed and chart has been pushed to live and pre private registries.'
           status: 'success'
+          previousStatus: '$(previousStatus)'
           sourceHost: '${{ parameters.sourceHost }}'
           sourceRepository: '${{ parameters.sourceRepository }}'
           destinationRegistry: '${{ parameters.destinationRegistry }}'
@@ -326,8 +372,10 @@ stages:
   - job: SendHelmFailureTeamsMessage
     displayName: 'Send Helm Failure Alert to Teams Channel'
     dependsOn: PushPreVulnerableHelmChart
-    condition: always()
+    condition: and(always(), ne(stageDependencies.ScanHelmChart.HelmChartScan.outputs['checkPreviousStatus.previousStatus'], 'vulnerable'))
     pool: Mare Nectaris
+    variables:
+      previousStatus: $[ stageDependencies.ScanHelmChart.HelmChartScan.outputs['checkPreviousStatus.previousStatus'] ]
     steps:
     - template: steps/send-teams-alert.yml
       parameters:
@@ -336,6 +384,7 @@ stages:
           title: 'Helm Chart Scan Failed'
           message: 'Helm chart scanning failed due to vulnerabilities detected in chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}. Vulnerable chart pushed to pre registry.'
           status: 'failure'
+          previousStatus: '$(previousStatus)'
           sourceHost: '${{ parameters.sourceHost }}'
           sourceRepository: '${{ parameters.sourceRepository }}'
           preRegistry: '${{ parameters.preRegistry }}'
