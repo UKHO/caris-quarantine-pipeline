@@ -45,6 +45,38 @@ stages:
         containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
         command: 'login'
 
+    - task: Docker@2
+      displayName: 'Login to Destination Registry for Status Check'
+      inputs:
+        containerRegistry: '${{ parameters.destinationRegistryServiceConnection }}'
+        command: 'login'
+
+    - task: PowerShell@2
+      name: checkPreviousStatus
+      displayName: 'Check previous scan status'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $scannedImage = "${{ parameters.destinationRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned"
+          $vulnerableImage = "${{ parameters.destinationRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable"
+
+          $previousStatus = 'new'
+
+          docker manifest inspect $scannedImage 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            $previousStatus = 'clean'
+            Write-Host "Found existing scanned image: $scannedImage"
+          }
+
+          docker manifest inspect $vulnerableImage 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            $previousStatus = 'vulnerable'
+            Write-Host "Found existing vulnerable image: $vulnerableImage"
+          }
+
+          Write-Host "Previous scan status: $previousStatus"
+          Write-Host "##vso[task.setvariable variable=previousStatus;isOutput=true]$previousStatus"
+
     - task: PowerShell@2
       displayName: 'Pull Published Image'
       inputs:
@@ -125,23 +157,26 @@ stages:
 
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
-  dependsOn: [PushToPreACR, PushToPrivateRepo]
+  dependsOn: [ScanContainer, PushToPreACR, PushToPrivateRepo]
   condition: and(succeeded('PushToPreACR'), succeeded('PushToPrivateRepo'))
   jobs:
   - job: SendSuccessTeamsMessage
     displayName: 'Send Success Alert to Teams Channel'
+    condition: ne(stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'], 'clean')
     pool: Mare Nectaris
     variables:
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       fullDestinationImageName: '${{ parameters.destinationRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
       fullPreImageName: '${{ parameters.preRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+      previousStatus: $[ stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'] ]
     steps:
     - template: steps/send-teams-alert.yml
       parameters:
         teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
         payload:
           title: 'Container Scan Completed Successfully'
-          message: 'Container scanning passed and image has been pushed to live and pre private registries.'
+          message: 'Container scanning passed and image has been pushed to live and pre private registries. Previous status: $(previousStatus).'
+          previousStatus: '$(previousStatus)'
           status: 'success'
           sourceHost: '${{ parameters.sourceHost }}'
           sourceRepository: '${{ parameters.sourceRepository }}'
@@ -209,19 +244,21 @@ stages:
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'
     dependsOn: [PushPreVulnerableImage, PushVulnerableImage]
-    condition: always()
+    condition: and(always(), ne(stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'], 'vulnerable'))
     pool: Mare Nectaris
     variables:
       vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
       fullVulnerableImageName: '${{ parameters.destinationRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
       fullPreVulnerableImageName: '${{ parameters.preRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
+      previousStatus: $[ stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'] ]
     steps:
     - template: steps/send-teams-alert.yml
       parameters:
         teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
         payload:
           title: 'Container Scan Failed'
-          message: 'Container scanning failed due to vulnerabilities detected in image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}. Vulnerable images pushed to live and pre registries.'
+          message: 'Container scanning failed due to vulnerabilities detected in image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}. Vulnerable images pushed to live and pre registries. Previous status: $(previousStatus).'
+          previousStatus: '$(previousStatus)'
           status: 'failure'
           sourceHost: '${{ parameters.sourceHost }}'
           sourceRepository: '${{ parameters.sourceRepository }}'

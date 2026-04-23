@@ -16,6 +16,7 @@ Both pipelines share the same webhook resource (`AcrWebhookTrigger`) but use man
 - On success: rewrites the tag/version with a `-snyk-scanned` suffix and pushes to Pre and Live quarantine registries.
 - On failure: retags to `-vulnerable`, pushes to an isolated namespace, and posts to the configured Teams webhook.
 - Helm stages authenticate to every registry interaction using `az acr login --expose-token` piped into `helm registry login --password-stdin` for short-lived credentials.
+- **Status-change detection**: before scanning, each pipeline checks whether the image/chart was previously classified as `clean`, `vulnerable`, or `new`. Teams alerts are only sent when the scan outcome differs from the previous status (e.g. vulnerable → clean, or new → vulnerable). This prevents duplicate notifications when the same image is rescanned with no change in result.
 
 ## Architecture overview
 
@@ -40,7 +41,8 @@ Both pipelines share the same webhook resource (`AcrWebhookTrigger`) but use man
 - Authenticates against source/pre/live registries via Docker tasks bound to service connections.
 - Pulls the pushed image, runs `UkhoSnykScanTask@0` in container mode, and tags clean artifacts with `-snyk-scanned`.
 - Pushes clean images to `scanned/{repository}` namespaces in both Pre and Live ACRs, or to `vulnerable/{repository}` when the scan fails.
-- Sends Teams notifications from the success/failure stages.
+- Before scanning, checks the destination registry for existing `scanned/` and `vulnerable/` tags using `docker manifest inspect` to determine the previous scan status.
+- Sends Teams notifications from the success/failure stages only when the status changes. The `previousStatus` field is included in the alert payload.
 
 Required root variables/service connections (defined in `caris-quarantine-flow-pipeline-docker.yml`):
 - `sourceRegistryServiceConnection`, `preRegistryServiceConnection`, `destinationRegistryServiceConnection`.
@@ -55,6 +57,8 @@ Required root variables/service connections (defined in `caris-quarantine-flow-p
 - Runs `UkhoSnykScanTask@0` in IaC mode against the extracted chart contents.
 - Repackages clean charts with a `-snyk-scanned` suffix, pushes to Pre (`oci://{preRegistry}/scanned/charts`), then strips the suffix and promotes to Live.
 - On scan failure, republishes to `vulnerable/{sourceRepository}` inside the Pre registry for forensic use.
+- Before scanning, queries the Pre ACR for existing scanned/vulnerable tags via `az acr repository show-tags` to determine the previous scan status.
+- Teams alerts are only sent when the status changes. The `previousStatus` field is included in the alert payload.
 - Every Helm pull/push obtains an access token with `az acr login --expose-token`, feeds it into `helm registry login --password-stdin`, and ensures `helm registry logout` executes via `try/finally` blocks.
 
 ### Helm pipeline refactor (de-duplication)
@@ -126,4 +130,25 @@ Additional variables this pipeline expects (see `caris-quarantine-flow-pipeline-
 - Push a hardened image via the bootstrap import pipeline and confirm the Helm quarantine pipeline run shows the `HelmChartScan` job as **Skipped** (not failed).
 - Re-run the bootstrap import pipeline for an already-imported image and confirm the quarantine pipeline is **not triggered** (no new push, no webhook).
 - Review the Teams alerts to ensure they reference the correct registry hostnames and repositories.
+- Re-import an image that was previously marked vulnerable, confirm the scan runs, and verify the Teams alert fires with `previousStatus: vulnerable`.
+- Re-import an image that was already clean and confirm no Teams alert is sent (status unchanged).
+
+## Alert behavior
+
+Teams alerts include a `previousStatus` field (`new`, `clean`, or `vulnerable`) so recipients can see the status transition at a glance.
+
+| Previous Status | Current Result | Alert Sent? |
+|---|---|---|
+| `new` | clean | Yes |
+| `new` | vulnerable | Yes |
+| `vulnerable` | clean | Yes (resolved) |
+| `clean` | vulnerable | Yes (regression) |
+| `clean` | clean | No |
+| `vulnerable` | vulnerable | No |
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-04-23 | Added status-change detection to container and Helm scan templates. Teams alerts now only fire when the scan outcome differs from the previous status. Alert payloads include `previousStatus` field. |
 
