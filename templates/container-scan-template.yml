@@ -269,7 +269,7 @@ stages:
 
   - job: RemoveScannedTags
     displayName: 'Remove previous scanned tags'
-    dependsOn: [PushPreVulnerableImage, PushVulnerableImage]
+    dependsOn: PushVulnerableImage
     condition: eq(stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'], 'clean')
     pool:
       name: Tiberius
