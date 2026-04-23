@@ -5,6 +5,10 @@ parameters:
     type: string
   - name: preRegistryServiceConnection
     type: string
+  - name: preAzureSubscription
+    type: string
+  - name: liveAzureSubscription
+    type: string
   - name: destinationRegistry
     type: string
   - name: preRegistry
@@ -160,6 +164,27 @@ stages:
   dependsOn: [ScanContainer, PushToPreACR, PushToPrivateRepo]
   condition: and(succeeded('PushToPreACR'), succeeded('PushToPrivateRepo'))
   jobs:
+  - job: RemoveVulnerableTags
+    displayName: 'Remove previous vulnerable tags'
+    condition: eq(stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'], 'vulnerable')
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
+    steps:
+    - template: steps/acr-delete-tag.yml
+      parameters:
+        displayName: 'Delete vulnerable tag from Pre ACR'
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        registryHost: '${{ parameters.preRegistry }}'
+        image: 'vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
+    - template: steps/acr-delete-tag.yml
+      parameters:
+        displayName: 'Delete vulnerable tag from Live ACR'
+        azureSubscription: '${{ parameters.liveAzureSubscription }}'
+        registryHost: '${{ parameters.destinationRegistry }}'
+        image: 'vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
+
   - job: SendSuccessTeamsMessage
     displayName: 'Send Success Alert to Teams Channel'
     condition: ne(stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'], 'clean')
@@ -240,6 +265,28 @@ stages:
         targetTag: '$(vulnerableImageTag)'
         tagDisplayName: 'Tag Image as Vulnerable'
         pushDisplayName: 'Push Vulnerable Image'
+
+  - job: RemoveScannedTags
+    displayName: 'Remove previous scanned tags'
+    dependsOn: [PushPreVulnerableImage, PushVulnerableImage]
+    condition: eq(stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'], 'clean')
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
+    steps:
+    - template: steps/acr-delete-tag.yml
+      parameters:
+        displayName: 'Delete scanned tag from Pre ACR'
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        registryHost: '${{ parameters.preRegistry }}'
+        image: 'scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+    - template: steps/acr-delete-tag.yml
+      parameters:
+        displayName: 'Delete scanned tag from Live ACR'
+        azureSubscription: '${{ parameters.liveAzureSubscription }}'
+        registryHost: '${{ parameters.destinationRegistry }}'
+        image: 'scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
 
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'

@@ -11,6 +11,10 @@ resources:
                   
 
 variables:
+  - name: preAzureSubscription
+    value: 'quarantine-helm-preacr'
+  - name: liveAzureSubscription
+    value: 'quarantine-helm-liveacr'
   - template: templates/common-variables.yml
 
 stages:
@@ -19,6 +23,8 @@ stages:
     sourceRegistryServiceConnection: '$(sourceRegistryServiceConnection)'
     destinationRegistryServiceConnection: '$(destinationRegistryServiceConnection)'
     preRegistryServiceConnection: '$(preRegistryServiceConnection)'
+    preAzureSubscription: '$(preAzureSubscription)'
+    liveAzureSubscription: '$(liveAzureSubscription)'
     destinationRegistry: '$(destinationRegistry)'
     preRegistry: '$(preRegistry)'
     snykServiceConnection: '$(snykServiceConnection)'
