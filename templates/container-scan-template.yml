@@ -129,6 +129,28 @@ stages:
         tagDisplayName: 'Tag Image for Pre'
         pushDisplayName: 'Push Scanned Image to Pre Registry'
 
+  - job: RemoveVulnerableTags
+    displayName: 'Remove previous vulnerable tags'
+    dependsOn: PushToPre
+    condition: eq(stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'], 'vulnerable')
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
+    steps:
+    - template: steps/acr-delete-tag.yml
+      parameters:
+        displayName: 'Delete vulnerable tag from Pre ACR'
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        registryHost: '${{ parameters.preRegistry }}'
+        image: 'vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
+    - template: steps/acr-delete-tag.yml
+      parameters:
+        displayName: 'Delete vulnerable tag from Live ACR'
+        azureSubscription: '${{ parameters.liveAzureSubscription }}'
+        registryHost: '${{ parameters.destinationRegistry }}'
+        image: 'vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
+
 - stage: PushToPrivateRepo
   displayName: 'Push passed image to Live ACR'
   dependsOn: PushToPreACR
@@ -164,27 +186,6 @@ stages:
   dependsOn: [ScanContainer, PushToPreACR, PushToPrivateRepo]
   condition: and(succeeded('PushToPreACR'), succeeded('PushToPrivateRepo'))
   jobs:
-  - job: RemoveVulnerableTags
-    displayName: 'Remove previous vulnerable tags'
-    condition: eq(stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'], 'vulnerable')
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
-    steps:
-    - template: steps/acr-delete-tag.yml
-      parameters:
-        displayName: 'Delete vulnerable tag from Pre ACR'
-        azureSubscription: '${{ parameters.preAzureSubscription }}'
-        registryHost: '${{ parameters.preRegistry }}'
-        image: 'vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
-    - template: steps/acr-delete-tag.yml
-      parameters:
-        displayName: 'Delete vulnerable tag from Live ACR'
-        azureSubscription: '${{ parameters.liveAzureSubscription }}'
-        registryHost: '${{ parameters.destinationRegistry }}'
-        image: 'vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
-
   - job: SendSuccessTeamsMessage
     displayName: 'Send Success Alert to Teams Channel'
     condition: ne(stageDependencies.ScanContainer.ContainerScan.outputs['checkPreviousStatus.previousStatus'], 'clean')

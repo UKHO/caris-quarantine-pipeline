@@ -226,6 +226,31 @@ stages:
         repository: '$(preChartRepository)'
         chartPath: '$(repackagedChartPath)'
 
+  - job: RemoveVulnerableHelmTags
+    displayName: 'Remove previous vulnerable Helm tags'
+    dependsOn: PushHelmToPre
+    condition: eq(stageDependencies.ScanHelmChart.HelmChartScan.outputs['checkPreviousStatus.previousStatus'], 'vulnerable')
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
+    steps:
+    - template: steps/azurecli-pscore.yml
+      parameters:
+        displayName: 'Resolve chart version'
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+        importHelmPipelineModule: true
+        inlineScript: |
+          $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost "${{ parameters.sourceHost }}"
+          $chartVersion = Get-HelmChartVersionFromManifest -RegistryName $sourceRegistryName -Repository "${{ parameters.sourceRepository }}" -FallbackTag "${{ parameters.sourceTag }}"
+          Write-Host "##vso[task.setvariable variable=imageToDelete]vulnerable/${{ parameters.sourceRepository }}:${chartVersion}-vulnerable"
+    - template: steps/acr-delete-tag.yml
+      parameters:
+        displayName: 'Delete vulnerable tag from Pre ACR'
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        registryHost: '${{ parameters.preRegistry }}'
+        image: '$(imageToDelete)'
+
 - stage: PushHelmToPrivateRepo
   displayName: 'Push scanned Helm chart to Live ACR'
   dependsOn: PushHelmToPreACR
@@ -294,30 +319,6 @@ stages:
   dependsOn: [ScanHelmChart, PushHelmToPreACR, PushHelmToPrivateRepo]
   condition: and(succeeded('PushHelmToPreACR'), succeeded('PushHelmToPrivateRepo'))
   jobs:
-  - job: RemoveVulnerableHelmTags
-    displayName: 'Remove previous vulnerable Helm tags'
-    condition: eq(stageDependencies.ScanHelmChart.HelmChartScan.outputs['checkPreviousStatus.previousStatus'], 'vulnerable')
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
-    steps:
-    - template: steps/azurecli-pscore.yml
-      parameters:
-        displayName: 'Resolve chart version'
-        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        importHelmPipelineModule: true
-        inlineScript: |
-          $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost "${{ parameters.sourceHost }}"
-          $chartVersion = Get-HelmChartVersionFromManifest -RegistryName $sourceRegistryName -Repository "${{ parameters.sourceRepository }}" -FallbackTag "${{ parameters.sourceTag }}"
-          Write-Host "##vso[task.setvariable variable=imageToDelete]vulnerable/${{ parameters.sourceRepository }}:${chartVersion}-vulnerable"
-    - template: steps/acr-delete-tag.yml
-      parameters:
-        displayName: 'Delete vulnerable tag from Pre ACR'
-        azureSubscription: '${{ parameters.preAzureSubscription }}'
-        registryHost: '${{ parameters.preRegistry }}'
-        image: '$(imageToDelete)'
-
   - job: SendHelmSuccessTeamsMessage
     displayName: 'Send Helm Success Alert to Teams Channel'
     condition: ne(stageDependencies.ScanHelmChart.HelmChartScan.outputs['checkPreviousStatus.previousStatus'], 'clean')
