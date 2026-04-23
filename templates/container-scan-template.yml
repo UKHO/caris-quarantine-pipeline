@@ -80,6 +80,7 @@ stages:
 
           Write-Host "Previous scan status: $previousStatus"
           Write-Host "##vso[task.setvariable variable=previousStatus;isOutput=true]$previousStatus"
+          exit 0
 
     - task: PowerShell@2
       displayName: 'Pull Published Image'
