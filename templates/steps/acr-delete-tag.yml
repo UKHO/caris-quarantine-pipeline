@@ -1,0 +1,23 @@
+parameters:
+  - name: displayName
+    type: string
+    default: 'Delete ACR tag'
+  - name: azureSubscription
+    type: string
+  - name: registryHost
+    type: string
+  - name: image
+    type: string
+
+steps:
+- task: AzureCLI@2
+  displayName: '${{ parameters.displayName }}'
+  inputs:
+    azureSubscription: '${{ parameters.azureSubscription }}'
+    scriptType: 'pscore'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      $registryName = '${{ parameters.registryHost }}' -replace '\.azurecr\.io$', ''
+      $image = '${{ parameters.image }}'
+      Write-Host "Deleting $image from $registryName"
+      az acr repository delete --name $registryName --image $image --yes
