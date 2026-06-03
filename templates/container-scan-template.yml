@@ -21,6 +21,14 @@ parameters:
     type: string
   - name: sourceHost
     type: string
+  - name: globalPreRegistryServiceConnection
+    type: string
+  - name: globalLiveRegistryServiceConnection
+    type: string
+  - name: globalPreRegistry
+    type: string
+  - name: globalLiveRegistry
+    type: string
 
 stages:
 - stage: ScanContainer
@@ -123,10 +131,70 @@ stages:
         tagDisplayName: 'Tag Image as Snyk Scanned'
         pushDisplayName: 'Push Scanned Image to Destination Registry'
 
+- stage: PushToGlobalPreACR
+  displayName: 'Push scanned image to Global Pre ACR'
+  dependsOn: ScanContainer
+  condition: succeeded('ScanContainer')
+  jobs:
+  - job: PushToGlobalPre
+    displayName: 'Push to Global Pre ACR'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
+    variables:
+      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
+      globalPreImageRepository: 'scanned/${{ parameters.sourceRepository }}'
+      fullGlobalPreImageName: '${{ parameters.globalPreRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+    steps:
+    - template: steps/docker-copy-image.yml
+      parameters:
+        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        targetRegistryServiceConnection: '${{ parameters.globalPreRegistryServiceConnection }}'
+        targetRegistryDisplayName: 'Login to Global Pre Registry'
+        targetImageName: '$(fullGlobalPreImageName)'
+        targetRepository: '$(globalPreImageRepository)'
+        targetTag: '$(scannedImageTag)'
+        tagDisplayName: 'Tag Image for Global Pre'
+        pushDisplayName: 'Push Scanned Image to Global Pre Registry'
+
+- stage: PushToGlobalLiveACR
+  displayName: 'Push scanned image to Global Live ACR'
+  dependsOn: PushToGlobalPreACR
+  condition: succeeded('PushToGlobalPreACR')
+  jobs:
+  - job: PushToGlobalLive
+    displayName: 'Push to Global Live ACR'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
+    variables:
+      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
+      globalLiveImageRepository: 'scanned/${{ parameters.sourceRepository }}'
+      fullGlobalLiveImageName: '${{ parameters.globalLiveRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+    steps:
+    - template: steps/docker-copy-image.yml
+      parameters:
+        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        targetRegistryServiceConnection: '${{ parameters.globalLiveRegistryServiceConnection }}'
+        targetRegistryDisplayName: 'Login to Global Live Registry'
+        targetImageName: '$(fullGlobalLiveImageName)'
+        targetRepository: '$(globalLiveImageRepository)'
+        targetTag: '$(scannedImageTag)'
+        tagDisplayName: 'Tag Image for Global Live'
+        pushDisplayName: 'Push Scanned Image to Global Live Registry'
+
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
-  dependsOn: [PushToPreACR, PushToPrivateRepo]
-  condition: and(succeeded('PushToPreACR'), succeeded('PushToPrivateRepo'))
+  dependsOn: [PushToPreACR, PushToPrivateRepo, PushToGlobalPreACR, PushToGlobalLiveACR]
+  condition: and(succeeded('PushToPreACR'), succeeded('PushToPrivateRepo'), succeeded('PushToGlobalPreACR'), succeeded('PushToGlobalLiveACR'))
   jobs:
   - job: SendSuccessTeamsMessage
     displayName: 'Send Success Alert to Teams Channel'
@@ -135,19 +203,23 @@ stages:
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       fullDestinationImageName: '${{ parameters.destinationRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
       fullPreImageName: '${{ parameters.preRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+      fullGlobalPreImageName: '${{ parameters.globalPreRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+      fullGlobalLiveImageName: '${{ parameters.globalLiveRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
     steps:
     - template: steps/send-teams-alert.yml
       parameters:
         teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
         payload:
           title: 'Container Scan Completed Successfully'
-          message: 'Container scanning passed and image has been pushed to live and pre private registries.'
+          message: 'Container scanning passed and image has been pushed to all private registries.'
           status: 'success'
           sourceHost: '${{ parameters.sourceHost }}'
           sourceRepository: '${{ parameters.sourceRepository }}'
           sourceTag: '${{ parameters.sourceTag }}'
           destinationImage: '$(fullDestinationImageName)'
           preImage: '$(fullPreImageName)'
+          globalPreImage: '$(fullGlobalPreImageName)'
+          globalLiveImage: '$(fullGlobalLiveImageName)'
           pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
 
 - stage: AlertOnFail

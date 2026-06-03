@@ -14,3 +14,11 @@ variables:
     value: 'SnykAuth'
   - name: snykOrganization
     value: 'caris-cloud'
+  - name: globalPreRegistryServiceConnection
+    value: 'globalpreacr-docker'
+  - name: globalLiveRegistryServiceConnection
+    value: 'globalliveacr-docker'
+  - name: globalPreRegistry
+    value: 'globalpreacr.azurecr.io'
+  - name: globalLiveRegistry
+    value: 'globalliveacr.azurecr.io'
