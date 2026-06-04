@@ -19,8 +19,6 @@ stages:
     sourceRegistryServiceConnection: '$(sourceRegistryServiceConnection)'
     destinationRegistryServiceConnection: '$(destinationRegistryServiceConnection)'
     preRegistryServiceConnection: '$(preRegistryServiceConnection)'
-    preAzureSubscription: '$(preAzureSubscription)'
-    liveAzureSubscription: '$(liveAzureSubscription)'
     destinationRegistry: '$(destinationRegistry)'
     preRegistry: '$(preRegistry)'
     snykServiceConnection: '$(snykServiceConnection)'

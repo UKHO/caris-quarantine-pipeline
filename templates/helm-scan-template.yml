@@ -408,108 +408,8 @@ stages:
   dependsOn: ScanHelmChart
   condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'vulnerable')
   jobs:
-  - job: PushPreVulnerableHelmChart
-    displayName: 'Push Vulnerable Helm Chart to Pre vulnerable namespace'
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
-    variables:
-      vulnerableChartRepository: 'vulnerable/${{ parameters.sourceRepository }}'
-    steps:
-    - template: steps/azurecli-pscore.yml
-      parameters:
-        displayName: 'Pull and Repackage Vulnerable Chart'
-        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        importHelmPipelineModule: true
-        inlineScript: |
-          # Extract registry name
-          $sourceRegistryHost = "${{ parameters.sourceHost }}"
-          $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
-          
-          $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
-          
-          # Get chart version
-          $chartVersion = Get-HelmChartVersionFromManifest -RegistryName $sourceRegistryName -Repository "${{ parameters.sourceRepository }}" -FallbackTag "${{ parameters.sourceTag }}"
-          Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
-          $vulnerableVersion = "$chartVersion-vulnerable"
-          Write-Host "##vso[task.setvariable variable=vulnerableChartTag]$vulnerableVersion"
-          
-          # Create temp directory
-          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-vulnerable'
-          
-          # Pull the Helm chart
-          $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
-          Write-Host "Pulling vulnerable Helm chart: $chartReference --version $chartVersion"
-          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -Version $chartVersion -ErrorMessage "Unable to locate vulnerable chart artifact"
-          
-          # Repackage with vulnerable version
-          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartArchivePath $chartFile -NewVersion $vulnerableVersion -OutputDirectory $chartDir.FullName
-          
-          Write-Host "Repackaged chart path: $repackagedChart"
-          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
-
-    - template: steps/helm-push-to-acr.yml
-      parameters:
-        displayName: 'Push Vulnerable Chart to Pre ACR'
-        azureSubscription: '${{ parameters.preAzureSubscription }}'
-        registryHost: '${{ parameters.preRegistry }}'
-        repository: '$(vulnerableChartRepository)'
-        chartPath: '$(repackagedChartPath)'
-
-  - job: PushGlobalPreVulnerableHelmChart
-    displayName: 'Push Vulnerable Helm Chart to Global Pre vulnerable namespace'
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
-    variables:
-      vulnerableChartRepository: 'vulnerable/${{ parameters.sourceRepository }}'
-    steps:
-    - template: steps/azurecli-pscore.yml
-      parameters:
-        displayName: 'Pull and Repackage Vulnerable Chart for Global Pre'
-        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        importHelmPipelineModule: true
-        inlineScript: |
-          # Extract registry name
-          $sourceRegistryHost = "${{ parameters.sourceHost }}"
-          $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
-          
-          $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
-          
-          # Get chart version
-          $chartVersion = Get-HelmChartVersionFromManifest -RegistryName $sourceRegistryName -Repository "${{ parameters.sourceRepository }}" -FallbackTag "${{ parameters.sourceTag }}"
-          Write-Host "##vso[task.setvariable variable=helmChartVersion]$chartVersion"
-          $vulnerableVersion = "$chartVersion-vulnerable"
-          Write-Host "##vso[task.setvariable variable=vulnerableChartTag]$vulnerableVersion"
-          
-          # Create temp directory
-          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-vulnerable-global-pre'
-          
-          # Pull the Helm chart
-          $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
-          Write-Host "Pulling vulnerable Helm chart: $chartReference --version $chartVersion"
-          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -Version $chartVersion -ErrorMessage "Unable to locate vulnerable chart artifact"
-          
-          # Repackage with vulnerable version
-          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartArchivePath $chartFile -NewVersion $vulnerableVersion -OutputDirectory $chartDir.FullName
-          
-          Write-Host "Repackaged chart path: $repackagedChart"
-          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
-
-    - template: steps/helm-push-to-acr.yml
-      parameters:
-        displayName: 'Push Vulnerable Chart to Global Pre ACR'
-        azureSubscription: '${{ parameters.preAzureSubscription }}'
-        registryHost: '${{ parameters.globalPreRegistry }}'
-        repository: '$(vulnerableChartRepository)'
-        chartPath: '$(repackagedChartPath)'
-
   - job: SendHelmFailureTeamsMessage
     displayName: 'Send Helm Failure Alert to Teams Channel'
-    dependsOn: [PushPreVulnerableHelmChart, PushGlobalPreVulnerableHelmChart]
-    condition: always()
     pool: Mare Nectaris
     steps:
     - template: steps/send-teams-alert.yml
@@ -517,11 +417,8 @@ stages:
         teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
         payload:
           title: 'Helm Chart Scan Failed'
-          message: 'Helm chart scanning failed due to vulnerabilities detected in chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}. Vulnerable chart pushed to pre registries.'
+          message: 'Helm chart scanning failed due to vulnerabilities detected in chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}.'
           status: 'failure'
           sourceHost: '${{ parameters.sourceHost }}'
           sourceRepository: '${{ parameters.sourceRepository }}'
-          preRegistry: '${{ parameters.preRegistry }}'
-          globalPreRegistry: '${{ parameters.globalPreRegistry }}'
-          vulnerableRepository: 'vulnerable/${{ parameters.sourceRepository }}'
           pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'

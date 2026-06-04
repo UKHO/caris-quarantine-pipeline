@@ -5,10 +5,6 @@ parameters:
     type: string
   - name: preRegistryServiceConnection
     type: string
-  - name: preAzureSubscription
-    type: string
-  - name: liveAzureSubscription
-    type: string
   - name: destinationRegistry
     type: string
   - name: preRegistry
@@ -231,175 +227,19 @@ stages:
   dependsOn: ScanContainer
   condition: failed('ScanContainer')
   jobs:
-  - job: PushPreVulnerableImage
-    displayName: 'Push Vulnerable Image to Pre ACR'
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
-    variables:
-      vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
-      preVulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
-      fullPreVulnerableImageName: '${{ parameters.preRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
-    steps:
-    - template: steps/docker-copy-image.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        targetRegistryServiceConnection: '${{ parameters.preRegistryServiceConnection }}'
-        targetRegistryDisplayName: 'Login to Pre Registry'
-        targetImageName: '$(fullPreVulnerableImageName)'
-        targetRepository: '$(preVulnerableImageRepository)'
-        targetTag: '$(vulnerableImageTag)'
-        tagDisplayName: 'Tag Image as Vulnerable for Pre'
-        pushDisplayName: 'Push Vulnerable Image to Pre Registry'
-
-  - job: PushVulnerableImage
-    displayName: 'Push Vulnerable Image to Live ACR'
-    dependsOn: PushPreVulnerableImage
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals BUS
-    variables:
-      vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
-      vulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
-      fullVulnerableImageName: '${{ parameters.destinationRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
-    steps:
-    - template: steps/docker-copy-image.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        targetRegistryServiceConnection: '${{ parameters.destinationRegistryServiceConnection }}'
-        targetRegistryDisplayName: 'Login to Destination Registry'
-        targetImageName: '$(fullVulnerableImageName)'
-        targetRepository: '$(vulnerableImageRepository)'
-        targetTag: '$(vulnerableImageTag)'
-        tagDisplayName: 'Tag Image as Vulnerable'
-        pushDisplayName: 'Push Vulnerable Image'
-
-  - job: PushGlobalPreVulnerableImage
-    displayName: 'Push Vulnerable Image to Global Pre ACR'
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
-    variables:
-      vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
-      globalPreVulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
-      fullGlobalPreVulnerableImageName: '${{ parameters.globalPreRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
-    steps:
-    - template: steps/docker-copy-image.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        targetRegistryServiceConnection: '${{ parameters.globalPreRegistryServiceConnection }}'
-        targetRegistryDisplayName: 'Login to Global Pre Registry'
-        targetImageName: '$(fullGlobalPreVulnerableImageName)'
-        targetRepository: '$(globalPreVulnerableImageRepository)'
-        targetTag: '$(vulnerableImageTag)'
-        tagDisplayName: 'Tag Image as Vulnerable for Global Pre'
-        pushDisplayName: 'Push Vulnerable Image to Global Pre Registry'
-
-  - job: PushGlobalLiveVulnerableImage
-    displayName: 'Push Vulnerable Image to Global Live ACR'
-    dependsOn: PushGlobalPreVulnerableImage
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals BUS
-    variables:
-      vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
-      globalLiveVulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
-      fullGlobalLiveVulnerableImageName: '${{ parameters.globalLiveRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
-    steps:
-    - template: steps/docker-copy-image.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        targetRegistryServiceConnection: '${{ parameters.globalLiveRegistryServiceConnection }}'
-        targetRegistryDisplayName: 'Login to Global Live Registry'
-        targetImageName: '$(fullGlobalLiveVulnerableImageName)'
-        targetRepository: '$(globalLiveVulnerableImageRepository)'
-        targetTag: '$(vulnerableImageTag)'
-        tagDisplayName: 'Tag Image as Vulnerable for Global Live'
-        pushDisplayName: 'Push Vulnerable Image to Global Live Registry'
-
-  - job: RemoveGlobalPreScannedTag
-    displayName: 'Remove scanned tag from Global Pre ACR'
-    dependsOn: PushGlobalPreVulnerableImage
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
-    steps:
-    - template: steps/azurecli-pscore.yml
-      parameters:
-        displayName: 'Delete scanned tag from Global Pre ACR'
-        azureSubscription: '${{ parameters.preAzureSubscription }}'
-        inlineScript: |
-          $image = "scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned"
-          Write-Host "Attempting to delete: $image from ${{ parameters.globalPreRegistry }}"
-          $registryName = "${{ parameters.globalPreRegistry }}" -replace '\.azurecr\.io$', ''
-          az acr repository delete --name $registryName --image $image --yes 2>&1 | ForEach-Object { Write-Host $_ }
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "##[warning]Tag may not exist - continuing"
-          }
-
-  - job: RemoveGlobalLiveScannedTag
-    displayName: 'Remove scanned tag from Global Live ACR'
-    dependsOn: PushGlobalLiveVulnerableImage
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals BUS
-    steps:
-    - template: steps/azurecli-pscore.yml
-      parameters:
-        displayName: 'Delete scanned tag from Global Live ACR'
-        azureSubscription: '${{ parameters.liveAzureSubscription }}'
-        inlineScript: |
-          $image = "scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned"
-          Write-Host "Attempting to delete: $image from ${{ parameters.globalLiveRegistry }}"
-          $registryName = "${{ parameters.globalLiveRegistry }}" -replace '\.azurecr\.io$', ''
-          az acr repository delete --name $registryName --image $image --yes 2>&1 | ForEach-Object { Write-Host $_ }
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "##[warning]Tag may not exist - continuing"
-          }
-
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'
-    dependsOn: [PushPreVulnerableImage, PushVulnerableImage, PushGlobalPreVulnerableImage, PushGlobalLiveVulnerableImage, RemoveGlobalPreScannedTag, RemoveGlobalLiveScannedTag]
-    condition: always()
     pool: Mare Nectaris
-    variables:
-      vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
-      fullVulnerableImageName: '${{ parameters.destinationRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
-      fullPreVulnerableImageName: '${{ parameters.preRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
-      fullGlobalPreVulnerableImageName: '${{ parameters.globalPreRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
-      fullGlobalLiveVulnerableImageName: '${{ parameters.globalLiveRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
     steps:
     - template: steps/send-teams-alert.yml
       parameters:
         teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
         payload:
           title: 'Container Scan Failed'
-          message: 'Container scanning failed due to vulnerabilities detected in image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}. Vulnerable images pushed to all registries.'
+          message: 'Container scanning failed due to vulnerabilities detected in image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}.'
           status: 'failure'
           sourceHost: '${{ parameters.sourceHost }}'
           sourceRepository: '${{ parameters.sourceRepository }}'
           sourceTag: '${{ parameters.sourceTag }}'
-          vulnerableImage: '$(fullVulnerableImageName)'
-          preVulnerableImage: '$(fullPreVulnerableImageName)'
-          globalPreVulnerableImage: '$(fullGlobalPreVulnerableImageName)'
-          globalLiveVulnerableImage: '$(fullGlobalLiveVulnerableImageName)'
           pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
 
