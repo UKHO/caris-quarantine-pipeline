@@ -5,6 +5,10 @@ parameters:
     type: string
   - name: preRegistryServiceConnection
     type: string
+  - name: preAzureSubscription
+    type: string
+  - name: liveAzureSubscription
+    type: string
   - name: destinationRegistry
     type: string
   - name: preRegistry
@@ -329,9 +333,51 @@ stages:
         tagDisplayName: 'Tag Image as Vulnerable for Global Live'
         pushDisplayName: 'Push Vulnerable Image to Global Live Registry'
 
+  - job: RemoveGlobalPreScannedTag
+    displayName: 'Remove scanned tag from Global Pre ACR'
+    dependsOn: PushGlobalPreVulnerableImage
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
+    steps:
+    - template: steps/azurecli-pscore.yml
+      parameters:
+        displayName: 'Delete scanned tag from Global Pre ACR'
+        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        inlineScript: |
+          $image = "scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned"
+          Write-Host "Attempting to delete: $image from ${{ parameters.globalPreRegistry }}"
+          $registryName = "${{ parameters.globalPreRegistry }}" -replace '\.azurecr\.io$', ''
+          az acr repository delete --name $registryName --image $image --yes 2>&1 | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "##[warning]Tag may not exist - continuing"
+          }
+
+  - job: RemoveGlobalLiveScannedTag
+    displayName: 'Remove scanned tag from Global Live ACR'
+    dependsOn: PushGlobalLiveVulnerableImage
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
+    steps:
+    - template: steps/azurecli-pscore.yml
+      parameters:
+        displayName: 'Delete scanned tag from Global Live ACR'
+        azureSubscription: '${{ parameters.liveAzureSubscription }}'
+        inlineScript: |
+          $image = "scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned"
+          Write-Host "Attempting to delete: $image from ${{ parameters.globalLiveRegistry }}"
+          $registryName = "${{ parameters.globalLiveRegistry }}" -replace '\.azurecr\.io$', ''
+          az acr repository delete --name $registryName --image $image --yes 2>&1 | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "##[warning]Tag may not exist - continuing"
+          }
+
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'
-    dependsOn: [PushPreVulnerableImage, PushVulnerableImage, PushGlobalPreVulnerableImage, PushGlobalLiveVulnerableImage]
+    dependsOn: [PushPreVulnerableImage, PushVulnerableImage, PushGlobalPreVulnerableImage, PushGlobalLiveVulnerableImage, RemoveGlobalPreScannedTag, RemoveGlobalLiveScannedTag]
     condition: always()
     pool: Mare Nectaris
     variables:

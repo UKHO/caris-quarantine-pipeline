@@ -14,6 +14,10 @@ variables:
     value: 'SnykAuth'
   - name: snykOrganization
     value: 'caris-cloud'
+  - name: preAzureSubscription
+    value: 'quarantine-helm-preacr'
+  - name: liveAzureSubscription
+    value: 'quarantine-helm-liveacr'
   - name: globalPreRegistryServiceConnection
     value: 'globalpreacr-docker'
   - name: globalLiveRegistryServiceConnection
