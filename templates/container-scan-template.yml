@@ -278,27 +278,82 @@ stages:
         tagDisplayName: 'Tag Image as Vulnerable'
         pushDisplayName: 'Push Vulnerable Image'
 
+  - job: PushGlobalPreVulnerableImage
+    displayName: 'Push Vulnerable Image to Global Pre ACR'
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ENG
+    variables:
+      vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
+      globalPreVulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
+      fullGlobalPreVulnerableImageName: '${{ parameters.globalPreRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
+    steps:
+    - template: steps/docker-copy-image.yml
+      parameters:
+        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        targetRegistryServiceConnection: '${{ parameters.globalPreRegistryServiceConnection }}'
+        targetRegistryDisplayName: 'Login to Global Pre Registry'
+        targetImageName: '$(fullGlobalPreVulnerableImageName)'
+        targetRepository: '$(globalPreVulnerableImageRepository)'
+        targetTag: '$(vulnerableImageTag)'
+        tagDisplayName: 'Tag Image as Vulnerable for Global Pre'
+        pushDisplayName: 'Push Vulnerable Image to Global Pre Registry'
+
+  - job: PushGlobalLiveVulnerableImage
+    displayName: 'Push Vulnerable Image to Global Live ACR'
+    dependsOn: PushGlobalPreVulnerableImage
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
+    variables:
+      vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
+      globalLiveVulnerableImageRepository: 'vulnerable/${{ parameters.sourceRepository }}'
+      fullGlobalLiveVulnerableImageName: '${{ parameters.globalLiveRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
+    steps:
+    - template: steps/docker-copy-image.yml
+      parameters:
+        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        targetRegistryServiceConnection: '${{ parameters.globalLiveRegistryServiceConnection }}'
+        targetRegistryDisplayName: 'Login to Global Live Registry'
+        targetImageName: '$(fullGlobalLiveVulnerableImageName)'
+        targetRepository: '$(globalLiveVulnerableImageRepository)'
+        targetTag: '$(vulnerableImageTag)'
+        tagDisplayName: 'Tag Image as Vulnerable for Global Live'
+        pushDisplayName: 'Push Vulnerable Image to Global Live Registry'
+
   - job: SendFailureTeamsMessage
     displayName: 'Send Failure Alert to Teams Channel'
-    dependsOn: [PushPreVulnerableImage, PushVulnerableImage]
+    dependsOn: [PushPreVulnerableImage, PushVulnerableImage, PushGlobalPreVulnerableImage, PushGlobalLiveVulnerableImage]
     condition: always()
     pool: Mare Nectaris
     variables:
       vulnerableImageTag: '${{ parameters.sourceTag }}-vulnerable'
       fullVulnerableImageName: '${{ parameters.destinationRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
       fullPreVulnerableImageName: '${{ parameters.preRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
+      fullGlobalPreVulnerableImageName: '${{ parameters.globalPreRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
+      fullGlobalLiveVulnerableImageName: '${{ parameters.globalLiveRegistry }}/vulnerable/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-vulnerable'
     steps:
     - template: steps/send-teams-alert.yml
       parameters:
         teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
         payload:
           title: 'Container Scan Failed'
-          message: 'Container scanning failed due to vulnerabilities detected in image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}. Vulnerable images pushed to live and pre registries.'
+          message: 'Container scanning failed due to vulnerabilities detected in image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}. Vulnerable images pushed to all registries.'
           status: 'failure'
           sourceHost: '${{ parameters.sourceHost }}'
           sourceRepository: '${{ parameters.sourceRepository }}'
           sourceTag: '${{ parameters.sourceTag }}'
           vulnerableImage: '$(fullVulnerableImageName)'
           preVulnerableImage: '$(fullPreVulnerableImageName)'
+          globalPreVulnerableImage: '$(fullGlobalPreVulnerableImageName)'
+          globalLiveVulnerableImage: '$(fullGlobalLiveVulnerableImageName)'
           pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
 
