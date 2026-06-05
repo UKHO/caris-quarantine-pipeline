@@ -129,185 +129,57 @@ stages:
           Write-Host "Helm scan outcome: $scanOutcome"
           Write-Host "##vso[task.setvariable variable=helmScanOutcome;isOutput=true]$scanOutcome"
 
-- stage: PushHelmToPreACR
-  displayName: 'Push scanned Helm chart to Pre ACR'
+- stage: PushHelmToPreACRs
+  displayName: 'Push scanned Helm chart to Pre ACRs'
   dependsOn: ScanHelmChart
   condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'clean')
   jobs:
-  - job: PushHelmToPre
-    displayName: 'Push Helm Chart to Pre ACR'
+  - job: PushHelmToPreRegistries
+    displayName: 'Push Helm Chart to Pre ACRs'
     pool:
       name: Tiberius
       demands:
       - ENVIRONMENT -equals ENG
-    variables:
-      scannedChartTag: '$(helmChartVersion)-snyk-scanned'
-      # Helm appends chart name from Chart.yaml, so use parent path only
-      preChartRepository: 'scanned/charts'
     steps:
     - template: steps/azurecli-pscore.yml
       parameters:
-        stepName: pullChart
-        displayName: 'Pull Helm Chart from Source ACR'
+        stepName: pullAndRepackage
+        displayName: 'Pull Helm Chart from Source and Repackage'
         azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         importHelmPipelineModule: true
         inlineScript: |
-          # Extract registry name
           $sourceRegistryHost = "${{ parameters.sourceHost }}"
           $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
-          
           $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
-          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-push'
           
-          # Pull the Helm chart (without version to get latest if no version)
+          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-pre'
           $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
           Write-Host "Pulling Helm chart: $chartReference"
           $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
           
-          # Extract to get version
-          $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage'
+          $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-pre'
           $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination $repackageDir.FullName
           $chartVersion = Get-HelmChartVersion -ChartDirectory $chartPath
-          Write-Host "Using chart version: $chartVersion"
-          Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
+          Write-Host "Chart version: $chartVersion"
           
-          $newVersion = "$chartVersion-snyk-scanned"
-          Write-Host "##vso[task.setvariable variable=scannedChartVersion;isOutput=true]$newVersion"
-          
-          # Repackage with new version
-          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartDirectory $chartPath -NewVersion $newVersion -OutputDirectory $chartDir.FullName
+          $scannedVersion = "$chartVersion-snyk-scanned"
+          Write-Host "Repackaging with version: $scannedVersion"
+          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartDirectory $chartPath -NewVersion $scannedVersion -OutputDirectory $chartDir.FullName
           
           if (-not $repackagedChart) {
             Write-Host "##[error]Unable to locate repackaged chart"
             exit 1
           }
-          Write-Host "Repackaged chart path: $repackagedChart"
+          Write-Host "Repackaged chart: $repackagedChart"
           Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
     - template: steps/helm-push-to-acr.yml
       parameters:
-        displayName: 'Push Helm Chart to Pre ACR'
+        displayName: 'Push Helm Chart to Caris Pre ACR'
         azureSubscription: '${{ parameters.preAzureSubscription }}'
         registryHost: '${{ parameters.preRegistry }}'
-        repository: '$(preChartRepository)'
-        chartPath: '$(repackagedChartPath)'
-
-- stage: PushHelmToPrivateRepo
-  displayName: 'Push scanned Helm chart to Live ACR'
-  dependsOn: PushHelmToPreACR
-  condition: succeeded('PushHelmToPreACR')
-  jobs:
-  - job: PullTagAndPushHelm
-    displayName: 'Pull, Tag, and Push Helm Chart'
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals BUS
-    variables:
-      # Helm appends chart name from Chart.yaml, so use parent path only
-      preChartRepository: 'scanned/charts'
-    steps:
-    - template: steps/azurecli-pscore.yml
-      parameters:
-        displayName: 'Pull and Repackage Scanned Chart from Pre ACR'
-        azureSubscription: '${{ parameters.preAzureSubscription }}'
-        importHelmPipelineModule: true
-        inlineScript: |
-          # Create temp directory
-          $chartName = "${{ parameters.sourceRepository }}" -split '/' | Select-Object -Last 1
-          $preChartRepository = "scanned/charts/$chartName"
-          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-final'
-          
-          # Login to Pre ACR and pull scanned chart
-          $preRegistryHost = "${{ parameters.preRegistry }}"
-          $preRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $preRegistryHost
-          $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
-          
-          # Get the latest tag for the chart
-          $latestTag = Get-AcrLatestTag -RegistryName $preRegistryName -Repository $preChartRepository
-          
-          Write-Host "Latest tag for chart: $latestTag"
-          
-          $preChartRef = "oci://$preRegistryHost/$preChartRepository"
-          Write-Host "Pulling scanned Helm chart from: $preChartRef --version $latestTag"
-          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $preRegistryHost -AccessToken $accessToken -ChartReference $preChartRef -Destination $chartDir.FullName -Version $latestTag -ErrorMessage "Failed to pull chart from Pre ACR."
-          
-          # Extract to get version
-          $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-live'
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination $repackageDir.FullName
-          $scannedVersion = Get-HelmChartVersion -ChartDirectory $chartPath
-          $originalVersion = $scannedVersion -replace '-snyk-scanned', ''
-          
-          Write-Host "Parsed scanned version: $scannedVersion"
-          Write-Host "Parsed original version: $originalVersion"
-          
-          # Repackage with original version
-          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartDirectory $chartPath -NewVersion $originalVersion -OutputDirectory $chartDir.FullName
-          
-          Write-Host "Repackaged chart path: $repackagedChart"
-          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
-
-    - template: steps/helm-push-to-acr.yml
-      parameters:
-        displayName: 'Push Helm Chart to Live ACR'
-        azureSubscription: '${{ parameters.liveAzureSubscription }}'
-        registryHost: '${{ parameters.destinationRegistry }}'
         repository: 'scanned/charts'
         chartPath: '$(repackagedChartPath)'
-
-- stage: PushHelmToGlobalPreACR
-  displayName: 'Push scanned Helm chart to Global Pre ACR'
-  dependsOn: ScanHelmChart
-  condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'clean')
-  jobs:
-  - job: PushHelmToGlobalPre
-    displayName: 'Push Helm Chart to Global Pre ACR'
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
-    variables:
-      scannedChartTag: '$(helmChartVersion)-snyk-scanned'
-      preChartRepository: 'scanned/charts'
-    steps:
-    - template: steps/azurecli-pscore.yml
-      parameters:
-        stepName: pullChart
-        displayName: 'Pull Helm Chart from Source ACR'
-        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        importHelmPipelineModule: true
-        inlineScript: |
-          # Extract registry name
-          $sourceRegistryHost = "${{ parameters.sourceHost }}"
-          $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
-          
-          $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
-          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-global-pre'
-          
-          # Pull the Helm chart
-          $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
-          Write-Host "Pulling Helm chart: $chartReference"
-          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
-          
-          # Extract to get version
-          $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-global-pre'
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination $repackageDir.FullName
-          $chartVersion = Get-HelmChartVersion -ChartDirectory $chartPath
-          Write-Host "Using chart version: $chartVersion"
-          Write-Host "##vso[task.setvariable variable=helmChartVersion;isOutput=true]$chartVersion"
-          
-          $newVersion = "$chartVersion-snyk-scanned"
-          Write-Host "##vso[task.setvariable variable=scannedChartVersion;isOutput=true]$newVersion"
-          
-          # Repackage with new version
-          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartDirectory $chartPath -NewVersion $newVersion -OutputDirectory $chartDir.FullName
-          
-          if (-not $repackagedChart) {
-            Write-Host "##[error]Unable to locate repackaged chart"
-            exit 1
-          }
-          Write-Host "Repackaged chart path: $repackagedChart"
-          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
     - template: steps/helm-push-to-acr.yml
       parameters:
@@ -317,59 +189,44 @@ stages:
         repository: 'scanned/charts'
         chartPath: '$(repackagedChartPath)'
 
-- stage: PushHelmToGlobalLiveACR
-  displayName: 'Push scanned Helm chart to Global Live ACR'
-  dependsOn: PushHelmToGlobalPreACR
-  condition: succeeded('PushHelmToGlobalPreACR')
+- stage: PushHelmToLiveACRs
+  displayName: 'Push scanned Helm chart to Live ACRs'
+  dependsOn: PushHelmToPreACRs
+  condition: succeeded('PushHelmToPreACRs')
   jobs:
-  - job: PushHelmToGlobalLive
-    displayName: 'Push Helm Chart to Global Live ACR'
+  - job: PushHelmToLiveRegistries
+    displayName: 'Push Helm Chart to Live ACRs'
     pool:
       name: Tiberius
       demands:
       - ENVIRONMENT -equals BUS
-    variables:
-      preChartRepository: 'scanned/charts'
     steps:
     - template: steps/azurecli-pscore.yml
       parameters:
-        displayName: 'Pull and Repackage Scanned Chart from Global Pre ACR'
-        azureSubscription: '${{ parameters.preAzureSubscription }}'
+        stepName: pullChart
+        displayName: 'Pull Helm Chart from Source'
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
         importHelmPipelineModule: true
         inlineScript: |
-          # Create temp directory
-          $chartName = "${{ parameters.sourceRepository }}" -split '/' | Select-Object -Last 1
-          $preChartRepository = "scanned/charts/$chartName"
-          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-global-live'
+          $sourceRegistryHost = "${{ parameters.sourceHost }}"
+          $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
+          $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
           
-          # Login to Global Pre ACR and pull scanned chart
-          $preRegistryHost = "${{ parameters.globalPreRegistry }}"
-          $preRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $preRegistryHost
-          $accessToken = Get-AcrAccessToken -RegistryName $preRegistryName -RegistryHost $preRegistryHost
+          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-live'
+          $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
+          Write-Host "Pulling Helm chart: $chartReference"
+          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
           
-          # Get the latest tag for the chart
-          $latestTag = Get-AcrLatestTag -RegistryName $preRegistryName -Repository $preChartRepository
-          
-          Write-Host "Latest tag for chart: $latestTag"
-          
-          $preChartRef = "oci://$preRegistryHost/$preChartRepository"
-          Write-Host "Pulling scanned Helm chart from: $preChartRef --version $latestTag"
-          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $preRegistryHost -AccessToken $accessToken -ChartReference $preChartRef -Destination $chartDir.FullName -Version $latestTag -ErrorMessage "Failed to pull chart from Global Pre ACR."
-          
-          # Extract to get version
-          $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-global-live'
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination $repackageDir.FullName
-          $scannedVersion = Get-HelmChartVersion -ChartDirectory $chartPath
-          $originalVersion = $scannedVersion -replace '-snyk-scanned', ''
-          
-          Write-Host "Parsed scanned version: $scannedVersion"
-          Write-Host "Parsed original version: $originalVersion"
-          
-          # Repackage with original version
-          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartDirectory $chartPath -NewVersion $originalVersion -OutputDirectory $chartDir.FullName
-          
-          Write-Host "Repackaged chart path: $repackagedChart"
-          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
+          Write-Host "Chart archive: $chartFile"
+          Write-Host "##vso[task.setvariable variable=chartArchivePath]$chartFile"
+
+    - template: steps/helm-push-to-acr.yml
+      parameters:
+        displayName: 'Push Helm Chart to Caris Live ACR'
+        azureSubscription: '${{ parameters.liveAzureSubscription }}'
+        registryHost: '${{ parameters.destinationRegistry }}'
+        repository: 'scanned/charts'
+        chartPath: '$(chartArchivePath)'
 
     - template: steps/helm-push-to-acr.yml
       parameters:
@@ -377,12 +234,12 @@ stages:
         azureSubscription: '${{ parameters.liveAzureSubscription }}'
         registryHost: '${{ parameters.globalLiveRegistry }}'
         repository: 'scanned/charts'
-        chartPath: '$(repackagedChartPath)'
+        chartPath: '$(chartArchivePath)'
 
 - stage: AlertOnHelmSuccess
   displayName: 'Alert that Helm scan completed successfully'
-  dependsOn: [PushHelmToPreACR, PushHelmToPrivateRepo, PushHelmToGlobalPreACR, PushHelmToGlobalLiveACR]
-  condition: and(succeeded('PushHelmToPreACR'), succeeded('PushHelmToPrivateRepo'), succeeded('PushHelmToGlobalPreACR'), succeeded('PushHelmToGlobalLiveACR'))
+  dependsOn: [PushHelmToPreACRs, PushHelmToLiveACRs]
+  condition: and(succeeded('PushHelmToPreACRs'), succeeded('PushHelmToLiveACRs'))
   jobs:
   - job: SendHelmSuccessTeamsMessage
     displayName: 'Send Helm Success Alert to Teams Channel'
