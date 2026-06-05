@@ -1,6 +1,8 @@
 trigger: none
 pr: none
 
+name: $(Date:yyyyMMdd)$(Rev:.r) ${{ replace(parameters.AcrWebhookTrigger.target.repository, '/', '-') }} ${{ parameters.AcrWebhookTrigger.target.tag }}
+
 resources:
   webhooks:
     - webhook: AcrWebhookTrigger
@@ -32,6 +34,10 @@ stages:
     snykServiceConnection: '$(snykServiceConnection)'
     snykOrganization: '$(snykOrganization)'
     teamsWebhookEndpoint: '$(teamsWebhookEndpoint)'
+    globalPreRegistryServiceConnection: '$(globalPreRegistryServiceConnection)'
+    globalLiveRegistryServiceConnection: '$(globalLiveRegistryServiceConnection)'
+    globalPreRegistry: '$(globalPreRegistry)'
+    globalLiveRegistry: '$(globalLiveRegistry)'
     sourceRepository: ${{ parameters.AcrWebhookTrigger.target.repository }}
     sourceTag: ${{ parameters.AcrWebhookTrigger.target.tag }}
     sourceHost: ${{ parameters.AcrWebhookTrigger.request.host }}
