@@ -1,6 +1,8 @@
 trigger: none
 pr: none
 
+name: $(Date:yyyyMMdd)$(Rev:.r) ${{ replace(parameters.AcrWebhookTrigger.target.repository, '/', '-') }} ${{ parameters.AcrWebhookTrigger.target.tag }}
+
 resources:
   webhooks:
     - webhook: AcrWebhookTrigger
