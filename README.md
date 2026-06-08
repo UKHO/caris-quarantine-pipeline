@@ -1,6 +1,6 @@
 # CARIS Quarantine Pipeline
 
-This repository contains Azure DevOps pipelines that quarantine artifacts pushed to a public Azure Container Registry (ACR). Artifacts are scanned with Snyk and, if clean, promoted to **six** private registries (Caris Pre, Caris Live, Global Pre, and Global Live). Vulnerable artifacts are **not** written to any destination — only a Teams alert is sent.
+This repository contains Azure DevOps pipelines that quarantine artifacts pushed to a public Azure Container Registry (ACR). Artifacts are scanned with Snyk and, if clean, promoted to **four** private registries (Caris Pre, Caris Live, Global Pre, and Global Live). Vulnerable artifacts are **not** written to any destination — only a Teams alert is sent.
 
 ## Supported artifact flows
 - **Docker pipeline** (`quarantine-docker-image.yml`): handles `application/vnd.docker.distribution.manifest.v2+json` pushes, performs a Snyk container scan via `templates/container-scan-template.yml`, and promotes images when they pass.
