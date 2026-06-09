@@ -40,6 +40,8 @@ stages:
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
         name: Private Link Deployments (BUS)
+        demands:
+        - ImageOverride -equals windows-latest
       ${{ else }}:
         name: Tiberius
         demands:
@@ -84,6 +86,8 @@ stages:
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
         name: Private Link Deployments (BUS)
+        demands:
+        - ImageOverride -equals windows-latest
       ${{ else }}:
         name: Tiberius
         demands:
@@ -117,6 +121,8 @@ stages:
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
         name: Private Link Deployments (BUS)
+        demands:
+        - ImageOverride -equals windows-latest
       ${{ else }}:
         name: Tiberius
         demands:
@@ -150,6 +156,8 @@ stages:
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
         name: Private Link Deployments (BUS)
+        demands:
+        - ImageOverride -equals windows-latest
       ${{ else }}:
         name: Tiberius
         demands:
@@ -183,6 +191,8 @@ stages:
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
         name: Private Link Deployments (BUS)
+        demands:
+        - ImageOverride -equals windows-latest
       ${{ else }}:
         name: Tiberius
         demands:
