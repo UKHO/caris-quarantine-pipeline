@@ -40,8 +40,6 @@ stages:
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
         name: Mare Nubium
-        demands:
-        - ENVIRONMENT -equals BUS
       ${{ else }}:
         name: Tiberius
         demands:
@@ -86,8 +84,6 @@ stages:
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
         name: Mare Nubium
-        demands:
-        - ENVIRONMENT -equals BUS
       ${{ else }}:
         name: Tiberius
         demands:
@@ -121,8 +117,6 @@ stages:
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
         name: Mare Nubium
-        demands:
-        - ENVIRONMENT -equals BUS
       ${{ else }}:
         name: Tiberius
         demands:
@@ -156,8 +150,6 @@ stages:
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
         name: Mare Nubium
-        demands:
-        - ENVIRONMENT -equals BUS
       ${{ else }}:
         name: Tiberius
         demands:
@@ -191,8 +183,6 @@ stages:
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
         name: Mare Nubium
-        demands:
-        - ENVIRONMENT -equals BUS
       ${{ else }}:
         name: Tiberius
         demands:
