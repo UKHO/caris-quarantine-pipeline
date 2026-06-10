@@ -39,7 +39,9 @@ stages:
     displayName: 'Scan Pushed Image'
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
-        name: Private Link Deployments (BUS)
+        name: Mare Nubium
+        demands:
+        - ENVIRONMENT -equals BUS
       ${{ else }}:
         name: Tiberius
         demands:
@@ -83,7 +85,9 @@ stages:
     displayName: 'Push to Pre ACR'
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
-        name: Private Link Deployments (BUS)
+        name: Mare Nubium
+        demands:
+        - ENVIRONMENT -equals BUS
       ${{ else }}:
         name: Tiberius
         demands:
@@ -116,7 +120,9 @@ stages:
     displayName: 'Pull, Tag and Push the image to the Private ACR'
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
-        name: Private Link Deployments (BUS)
+        name: Mare Nubium
+        demands:
+        - ENVIRONMENT -equals BUS
       ${{ else }}:
         name: Tiberius
         demands:
@@ -149,7 +155,9 @@ stages:
     displayName: 'Push to Global Pre ACR'
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
-        name: Private Link Deployments (BUS)
+        name: Mare Nubium
+        demands:
+        - ENVIRONMENT -equals BUS
       ${{ else }}:
         name: Tiberius
         demands:
@@ -182,7 +190,9 @@ stages:
     displayName: 'Push to Global Live ACR'
     pool:
       ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
-        name: Private Link Deployments (BUS)
+        name: Mare Nubium
+        demands:
+        - ENVIRONMENT -equals BUS
       ${{ else }}:
         name: Tiberius
         demands:
