@@ -38,9 +38,12 @@ stages:
   - job: ContainerScan
     displayName: 'Scan Pushed Image'
     pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals BUS
+      ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
+        name: Mare Nubium
+      ${{ else }}:
+        name: Tiberius
+        demands:
+        - ENVIRONMENT -equals BUS
     steps:
     - powershell: |
         $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) ${{ parameters.sourceTag }}"
@@ -79,9 +82,12 @@ stages:
   - job: PushToPre
     displayName: 'Push to Pre ACR'
     pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
+      ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
+        name: Mare Nubium
+      ${{ else }}:
+        name: Tiberius
+        demands:
+        - ENVIRONMENT -equals ENG
     variables:
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       preImageRepository: 'scanned/${{ parameters.sourceRepository }}'
@@ -109,9 +115,12 @@ stages:
   - job: PullTagAndPush
     displayName: 'Pull, Tag and Push the image to the Private ACR'
     pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals BUS
+      ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
+        name: Mare Nubium
+      ${{ else }}:
+        name: Tiberius
+        demands:
+        - ENVIRONMENT -equals BUS
     variables:
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       destinationImageRepository: 'scanned/${{ parameters.sourceRepository }}'
@@ -139,9 +148,12 @@ stages:
   - job: PushToGlobalPre
     displayName: 'Push to Global Pre ACR'
     pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
+      ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
+        name: Mare Nubium
+      ${{ else }}:
+        name: Tiberius
+        demands:
+        - ENVIRONMENT -equals ENG
     variables:
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       globalPreImageRepository: 'scanned/${{ parameters.sourceRepository }}'
@@ -169,9 +181,12 @@ stages:
   - job: PushToGlobalLive
     displayName: 'Push to Global Live ACR'
     pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals BUS
+      ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
+        name: Mare Nubium
+      ${{ else }}:
+        name: Tiberius
+        demands:
+        - ENVIRONMENT -equals BUS
     variables:
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       globalLiveImageRepository: 'scanned/${{ parameters.sourceRepository }}'
