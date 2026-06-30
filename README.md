@@ -9,13 +9,13 @@ This repository contains Azure DevOps pipelines that quarantine artifacts pushed
 
 All pipelines share the same webhook resource (`AcrWebhookTrigger`) but use manifest-type filters so only the relevant definition runs any stages.
 
-> **Note on hardened images:** The ACR webhook fires for every push to `publiccrlive`, including imports of hardened Docker images (e.g. `dhi/prometheus-operator`). The Helm pipeline guards against processing these by applying a **job-level condition** (`startsWith('caris/charts/', ...)`) in `helm-scan-template.yml` — the entire job is skipped for any repository that is not under `caris/charts/`.
+> **Note on hardened images:** The ACR webhook fires for every push to `ukhoacr`, including imports of hardened Docker images (e.g. `dhi/prometheus-operator`). The Helm pipeline guards against processing these by applying a **job-level condition** (`startsWith('caris/charts/', ...)`) in `helm-scan-template.yml` — the entire job is skipped for any repository that is not under `caris/charts/`.
 
 ## Registries
 
 | Registry | Purpose | Service Connection (Docker) | Service Connection (Azure Sub) |
 | --- | --- | --- | --- |
-| `publiccrlive.azurecr.io` | Source — public registry where images/charts arrive | `publiccrlive-docker` | `quarantine-helm-publicacr` |
+| `ukhoacr.azurecr.io` | Source — public registry where images/charts arrive | `ukhoacr-docker` | `quarantine-helm-ukhoacr` |
 | `carispreacr.azurecr.io` | Caris Pre — pre-production scanned artifacts | `carispreacr-docker` | `quarantine-helm-preacr` |
 | `carisliveacr.azurecr.io` | Caris Live — production scanned artifacts | `carisliveacr-docker` | `quarantine-helm-liveacr` |
 | `globalpreacr.azurecr.io` | Global Pre — pre-production (shared platform) | `globalpreacr-docker` | `quarantine-helm-preacr` |
@@ -59,7 +59,7 @@ All pipelines share the same webhook resource (`AcrWebhookTrigger`) but use mani
 - On failure, sends a Teams notification only.
 
 Required service connections (defined via `templates/common-variables.yml`):
-- Docker: `publiccrlive-docker`, `carispreacr-docker`, `carisliveacr-docker`, `globalpreacr-docker`, `globalliveacr-docker`
+- Docker: `ukhoacr-docker`, `carispreacr-docker`, `carisliveacr-docker`, `globalpreacr-docker`, `globalliveacr-docker`
 - `SnykAuth` for Snyk scanning.
 - `teamsWebhookEndpoint` secret (from `caris-quarantine` variable group).
 
@@ -89,8 +89,8 @@ Additional variables the Helm pipeline expects (see `quarantine-helm-chart.yml`)
 
 ## Setup checklist
 1. **Service connections**
-   - Docker: `publiccrlive-docker`, `carispreacr-docker`, `carisliveacr-docker`, `globalpreacr-docker`, `globalliveacr-docker`.
-   - Azure subscriptions for Helm: `quarantine-helm-publicacr`, `quarantine-helm-preacr`, `quarantine-helm-liveacr`.
+   - Docker: `ukhoacr-docker`, `carispreacr-docker`, `carisliveacr-docker`, `globalpreacr-docker`, `globalliveacr-docker`.
+   - Azure subscriptions for Helm: `quarantine-helm-ukhoacr`, `quarantine-helm-preacr`, `quarantine-helm-liveacr`.
    - `SnykAuth` for Snyk scanning.
    - `AcrWebhookConnection` for the shared webhook resource.
    - Docker registry service connections are configured as **Azure Container Registry - Workload Identity Federation** connections.

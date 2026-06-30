@@ -1,7 +1,7 @@
 variables:
   - group: caris-quarantine
   - name: sourceRegistryServiceConnection
-    value: 'publiccrlive-docker'
+    value: 'ukhoacr-docker'
   - name: destinationRegistryServiceConnection
     value: 'carisliveacr-docker'
   - name: preRegistryServiceConnection
