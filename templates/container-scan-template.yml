@@ -63,14 +63,25 @@ stages:
           $repository = "${{ parameters.sourceRepository }}"
           $tag = "${{ parameters.sourceTag }}"
 
-          # Read Docker credentials stored by the Docker@2 login task
+          # Read Docker config to find credentials
           $dockerConfigPath = if ($IsLinux) { "$env:HOME/.docker/config.json" } else { "$env:USERPROFILE/.docker/config.json" }
           $dockerConfig = Get-Content $dockerConfigPath | ConvertFrom-Json
-          $auth = $dockerConfig.auths.$registry.auth
 
+          # Try inline auth first
+          $auth = $dockerConfig.auths.$registry.auth
+          if (-not $auth) { $auth = $dockerConfig.auths."https://$registry".auth }
+
+          # If no inline auth, try credential helper
           if (-not $auth) {
-            # Try with https:// prefix
-            $auth = $dockerConfig.auths."https://$registry".auth
+            $credHelper = $dockerConfig.credsStore
+            if (-not $credHelper) {
+              $credHelper = $dockerConfig.credHelpers.$registry
+            }
+            if ($credHelper) {
+              Write-Host "Using credential helper: docker-credential-$credHelper"
+              $creds = echo $registry | & "docker-credential-$credHelper" get | ConvertFrom-Json
+              $auth = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$($creds.Username):$($creds.Secret)"))
+            }
           }
 
           if (-not $auth) {
