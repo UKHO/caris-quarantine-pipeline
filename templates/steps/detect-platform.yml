@@ -9,11 +9,6 @@ parameters:
     type: string
 
 steps:
-- powershell: |
-    $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) ${{ parameters.sourceTag }}"
-    Write-Host "##vso[build.updatebuildnumber]$name"
-  displayName: 'Set pipeline run name'
-
 - task: AzureCLI@2
   displayName: 'Detect platform from manifest'
   name: platform
