@@ -21,6 +21,8 @@ parameters:
     type: string
   - name: sourceHost
     type: string
+  - name: sourceAzureSubscription
+    type: string
   - name: globalPreRegistryServiceConnection
     type: string
   - name: globalLiveRegistryServiceConnection
@@ -47,64 +49,28 @@ stages:
         Write-Host "##vso[build.updatebuildnumber]$name"
       displayName: 'Set pipeline run name'
 
-    - task: Docker@2
-      displayName: 'Login to Source Registry'
-      inputs:
-        containerRegistry: '${{ parameters.sourceRegistryServiceConnection }}'
-        command: 'login'
-
-    - task: PowerShell@2
+    - task: AzureCLI@2
       displayName: 'Detect platform from manifest'
       name: platform
       inputs:
-        targetType: 'inline'
-        script: |
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+        scriptType: pscore
+        scriptLocation: inlineScript
+        inlineScript: |
           $registry = "${{ parameters.sourceHost }}"
           $repository = "${{ parameters.sourceRepository }}"
           $tag = "${{ parameters.sourceTag }}"
 
-          # Docker@2 writes credentials to a temporary config dir via DOCKER_CONFIG
-          $configDirs = @(
-            $env:DOCKER_CONFIG
-            "$env:HOME/.docker"
-            "$env:USERPROFILE/.docker"
-          ) | Where-Object { $_ -and (Test-Path "$_/config.json") }
-
-          $token = $null
-          foreach ($dir in $configDirs) {
-            $cfg = Get-Content "$dir/config.json" -Raw | ConvertFrom-Json
-
-            # Check identitytoken (ACR refresh token written by Docker@2)
-            $identityToken = $cfg.auths.$registry.identitytoken
-            if (-not $identityToken) { $identityToken = $cfg.auths."https://$registry".identitytoken }
-            if ($identityToken) {
-              $body = @{
-                grant_type = "refresh_token"
-                service = $registry
-                scope = "repository:${repository}:pull"
-                refresh_token = $identityToken
-              }
-              $tokenResponse = Invoke-RestMethod -Uri "https://$registry/oauth2/token" -Method POST -Body $body
-              $token = $tokenResponse.access_token
-              break
-            }
-
-            # Check basic auth
-            $auth = $cfg.auths.$registry.auth
-            if (-not $auth) { $auth = $cfg.auths."https://$registry".auth }
-            if ($auth) {
-              $headers = @{ "Authorization" = "Basic $auth" }
-              $tokenUri = "https://$registry/oauth2/token?service=$registry&scope=repository:${repository}:pull"
-              $tokenResponse = Invoke-RestMethod -Uri $tokenUri -Method GET -Headers $headers
-              $token = $tokenResponse.access_token
-              break
-            }
+          # Get ACR access token via Azure CLI (authenticated by service connection)
+          $acrName = $registry -replace '\.azurecr\.io$',''
+          $refreshToken = (az acr login --name $acrName --expose-token --only-show-errors | ConvertFrom-Json).accessToken
+          $body = @{
+            grant_type = "refresh_token"
+            service = $registry
+            scope = "repository:${repository}:pull"
+            refresh_token = $refreshToken
           }
-
-          if (-not $token) {
-            Write-Error "No credentials found for $registry in any Docker config"
-            exit 1
-          }
+          $token = (Invoke-RestMethod -Uri "https://$registry/oauth2/token" -Method POST -Body $body).access_token
 
           $manifestHeaders = @{
             "Authorization" = "Bearer $token"

@@ -2,6 +2,8 @@ variables:
   - group: caris-quarantine
   - name: sourceRegistryServiceConnection
     value: 'ukhoacr-docker'
+  - name: sourceAzureSubscription
+    value: 'Public ACR live'
   - name: destinationRegistryServiceConnection
     value: 'carisliveacr-docker'
   - name: preRegistryServiceConnection

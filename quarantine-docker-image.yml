@@ -17,6 +17,7 @@ stages:
 - template: templates/container-scan-template.yml
   parameters:
     sourceRegistryServiceConnection: '$(sourceRegistryServiceConnection)'
+    sourceAzureSubscription: '$(sourceAzureSubscription)'
     destinationRegistryServiceConnection: '$(destinationRegistryServiceConnection)'
     preRegistryServiceConnection: '$(preRegistryServiceConnection)'
     destinationRegistry: '$(destinationRegistry)'
