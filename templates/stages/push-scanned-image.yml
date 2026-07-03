@@ -47,6 +47,8 @@ stages:
     condition: eq(variables['detectedOS'], 'windows')
     pool:
       name: NautilusRelease
+      demands:
+      - ukho.osbuildtag -equals ltsc2022
     variables:
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       imageRepository: 'scanned/${{ parameters.sourceRepository }}'
