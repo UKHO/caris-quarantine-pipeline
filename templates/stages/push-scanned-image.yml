@@ -41,14 +41,13 @@ stages:
   condition: ${{ parameters.condition }}
   variables:
     poolName: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.poolName'] ]
-    agentDemand: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.demand${{ parameters.environment }}'] ]
   jobs:
   - job: Push
     displayName: '${{ parameters.stageDisplayName }}'
     pool:
       name: $(poolName)
       demands:
-      - $(agentDemand)
+      - ENVIRONMENT -equals ${{ parameters.environment }}
     variables:
       scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       imageRepository: 'scanned/${{ parameters.sourceRepository }}'

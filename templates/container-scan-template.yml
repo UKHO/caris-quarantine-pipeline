@@ -122,14 +122,13 @@ stages:
   condition: succeeded('DetectPlatform')
   variables:
     poolName: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.poolName'] ]
-    agentDemand: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.demandBUS'] ]
   jobs:
   - job: ContainerScan
     displayName: 'Scan Pushed Image'
     pool:
       name: $(poolName)
       demands:
-      - $(agentDemand)
+      - ENVIRONMENT -equals BUS
     steps:
     - template: steps/scan-container.yml
       parameters:
