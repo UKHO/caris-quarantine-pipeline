@@ -62,7 +62,7 @@ stages:
     pool:
       name: NautilusRelease
       demands:
-      - ukho.osbuildtag -equals 'ltsc2022'
+      - ukho.osbuildtag -equals ltsc2022
     steps:
     - template: steps/scan-container.yml
       parameters:
