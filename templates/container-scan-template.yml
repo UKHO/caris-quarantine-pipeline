@@ -101,19 +101,7 @@ stages:
           }
 
           Write-Host "Detected platform OS: $os"
-          if ($os -eq "windows") {
-            $poolName = "NautilusRelease"
-            $demandBUS = "azureps"
-            $demandENG = "azureps"
-          } else {
-            $poolName = "Tiberius"
-            $demandBUS = "ENVIRONMENT -equals BUS"
-            $demandENG = "ENVIRONMENT -equals ENG"
-          }
           Write-Host "##vso[task.setvariable variable=os;isOutput=true]$os"
-          Write-Host "##vso[task.setvariable variable=poolName;isOutput=true]$poolName"
-          Write-Host "##vso[task.setvariable variable=demandBUS;isOutput=true]$demandBUS"
-          Write-Host "##vso[task.setvariable variable=demandENG;isOutput=true]$demandENG"
           exit 0
 
 - stage: ScanContainer
@@ -121,12 +109,28 @@ stages:
   dependsOn: DetectPlatform
   condition: succeeded('DetectPlatform')
   variables:
-    poolName: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.poolName'] ]
+    detectedOS: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.os'] ]
   jobs:
-  - job: ContainerScan
-    displayName: 'Scan Pushed Image'
+  - job: ContainerScanWindows
+    displayName: 'Scan Pushed Image (Windows)'
+    condition: eq(variables['detectedOS'], 'windows')
     pool:
-      name: $(poolName)
+      name: NautilusRelease
+    steps:
+    - template: steps/scan-container.yml
+      parameters:
+        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        snykOrganization: '${{ parameters.snykOrganization }}'
+        snykServiceConnection: '${{ parameters.snykServiceConnection }}'
+
+  - job: ContainerScanLinux
+    displayName: 'Scan Pushed Image (Linux)'
+    condition: ne(variables['detectedOS'], 'windows')
+    pool:
+      name: Tiberius
       demands:
       - ENVIRONMENT -equals BUS
     steps:

@@ -40,12 +40,37 @@ stages:
     - ${{ dep }}
   condition: ${{ parameters.condition }}
   variables:
-    poolName: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.poolName'] ]
+    detectedOS: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.os'] ]
   jobs:
-  - job: Push
-    displayName: '${{ parameters.stageDisplayName }}'
+  - job: PushWindows
+    displayName: '${{ parameters.stageDisplayName }} (Windows)'
+    condition: eq(variables['detectedOS'], 'windows')
     pool:
-      name: $(poolName)
+      name: NautilusRelease
+    variables:
+      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
+      imageRepository: 'scanned/${{ parameters.sourceRepository }}'
+      fullImageName: '${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+    steps:
+    - template: ../steps/docker-copy-image.yml
+      parameters:
+        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        targetRegistryServiceConnection: '${{ parameters.targetRegistryServiceConnection }}'
+        targetRegistryDisplayName: '${{ parameters.targetRegistryDisplayName }}'
+        targetImageName: '$(fullImageName)'
+        targetRepository: '$(imageRepository)'
+        targetTag: '$(scannedImageTag)'
+        tagDisplayName: '${{ parameters.tagDisplayName }}'
+        pushDisplayName: '${{ parameters.pushDisplayName }}'
+
+  - job: PushLinux
+    displayName: '${{ parameters.stageDisplayName }} (Linux)'
+    condition: ne(variables['detectedOS'], 'windows')
+    pool:
+      name: Tiberius
       demands:
       - ENVIRONMENT -equals ${{ parameters.environment }}
     variables:
