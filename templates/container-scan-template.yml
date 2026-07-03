@@ -61,6 +61,8 @@ stages:
     condition: eq(dependencies.Detect.outputs['platform.os'], 'windows')
     pool:
       name: NautilusRelease
+      demands:
+      - ukho.osbuuldtag -equals 'ltsc2022'
     steps:
     - template: steps/scan-container.yml
       parameters:
