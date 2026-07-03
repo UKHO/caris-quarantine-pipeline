@@ -1,0 +1,70 @@
+parameters:
+  - name: sourceAzureSubscription
+    type: string
+  - name: sourceHost
+    type: string
+  - name: sourceRepository
+    type: string
+  - name: sourceTag
+    type: string
+
+steps:
+- powershell: |
+    $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) ${{ parameters.sourceTag }}"
+    Write-Host "##vso[build.updatebuildnumber]$name"
+  displayName: 'Set pipeline run name'
+
+- task: AzureCLI@2
+  displayName: 'Detect platform from manifest'
+  name: platform
+  inputs:
+    azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+    scriptType: pscore
+    scriptLocation: inlineScript
+    inlineScript: |
+      $registry = "${{ parameters.sourceHost }}"
+      $repository = "${{ parameters.sourceRepository }}"
+      $tag = "${{ parameters.sourceTag }}"
+
+      # Get ACR access token via Azure CLI (authenticated by service connection)
+      $acrName = $registry -replace '\.azurecr\.io$',''
+      $refreshToken = (az acr login --name $acrName --expose-token --only-show-errors | ConvertFrom-Json).accessToken
+      $body = @{
+        grant_type = "refresh_token"
+        service = $registry
+        scope = "repository:${repository}:pull"
+        refresh_token = $refreshToken
+      }
+      $token = (Invoke-RestMethod -Uri "https://$registry/oauth2/token" -Method POST -Body $body).access_token
+
+      $manifestHeaders = @{
+        "Authorization" = "Bearer $token"
+        "Accept" = "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json"
+      }
+
+      # Fetch the manifest
+      $manifest = Invoke-RestMethod -Uri "https://$registry/v2/$repository/manifests/$tag" -Headers $manifestHeaders
+
+      # Determine OS from manifest
+      $os = $null
+      if ($manifest.manifests) {
+        $os = $manifest.manifests[0].platform.os
+        Write-Host "Manifest list detected, OS from first entry: $os"
+      } else {
+        # Single-platform manifest - fetch the config blob for OS info
+        $configDigest = $manifest.config.digest
+        Write-Host "Single-platform manifest, fetching config blob: $configDigest"
+        $blobHeaders = @{ "Authorization" = "Bearer $token" }
+        $config = Invoke-RestMethod -Uri "https://$registry/v2/$repository/blobs/$configDigest" -Headers $blobHeaders
+        $os = $config.os
+        Write-Host "OS from config blob: $os"
+      }
+
+      if (-not $os) {
+        Write-Host "Unable to determine OS, defaulting to linux"
+        $os = "linux"
+      }
+
+      Write-Host "Detected platform OS: $os"
+      Write-Host "##vso[task.setvariable variable=os;isOutput=true]$os"
+      exit 0
