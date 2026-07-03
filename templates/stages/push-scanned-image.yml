@@ -1,0 +1,69 @@
+parameters:
+  - name: stageName
+    type: string
+  - name: stageDisplayName
+    type: string
+  - name: dependsOn
+    type: object
+  - name: condition
+    type: string
+  - name: environment
+    type: string
+    values:
+    - BUS
+    - ENG
+  - name: sourceRegistryServiceConnection
+    type: string
+  - name: sourceHost
+    type: string
+  - name: sourceRepository
+    type: string
+  - name: sourceTag
+    type: string
+  - name: targetRegistryServiceConnection
+    type: string
+  - name: targetRegistry
+    type: string
+  - name: targetRegistryDisplayName
+    type: string
+  - name: tagDisplayName
+    type: string
+  - name: pushDisplayName
+    type: string
+
+stages:
+- stage: ${{ parameters.stageName }}
+  displayName: '${{ parameters.stageDisplayName }}'
+  dependsOn:
+  - DetectPlatform
+  - ${{ each dep in parameters.dependsOn }}:
+    - ${{ dep }}
+  condition: ${{ parameters.condition }}
+  variables:
+    poolName: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.poolName'] ]
+    agentDemand: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.demand${{ parameters.environment }}'] ]
+  jobs:
+  - job: Push
+    displayName: '${{ parameters.stageDisplayName }}'
+    pool:
+      name: $(poolName)
+      demands:
+      - $(agentDemand)
+    variables:
+      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
+      imageRepository: 'scanned/${{ parameters.sourceRepository }}'
+      fullImageName: '${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+    steps:
+    - template: ../steps/docker-copy-image.yml
+      parameters:
+        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        targetRegistryServiceConnection: '${{ parameters.targetRegistryServiceConnection }}'
+        targetRegistryDisplayName: '${{ parameters.targetRegistryDisplayName }}'
+        targetImageName: '$(fullImageName)'
+        targetRepository: '$(imageRepository)'
+        targetTag: '$(scannedImageTag)'
+        tagDisplayName: '${{ parameters.tagDisplayName }}'
+        pushDisplayName: '${{ parameters.pushDisplayName }}'

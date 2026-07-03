@@ -31,19 +31,16 @@ parameters:
     type: string
 
 stages:
-- stage: ScanContainer
-  displayName: 'Scan Container'
+- stage: DetectPlatform
+  displayName: 'Detect Image Platform'
   condition: succeeded()
   jobs:
-  - job: ContainerScan
-    displayName: 'Scan Pushed Image'
+  - job: Detect
+    displayName: 'Query image platform from registry'
     pool:
-      ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
-        name: NautilusRelease
-      ${{ else }}:
-        name: Tiberius
-        demands:
-        - ENVIRONMENT -equals BUS
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals BUS
     steps:
     - powershell: |
         $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) ${{ parameters.sourceTag }}"
@@ -57,154 +54,130 @@ stages:
         command: 'login'
 
     - task: PowerShell@2
-      displayName: 'Pull Published Image'
+      displayName: 'Detect platform from manifest'
+      name: platform
       inputs:
         targetType: 'inline'
         script: |
-          docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
+          $manifest = docker manifest inspect ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} | ConvertFrom-Json
+          if ($manifest.manifests) {
+            $os = $manifest.manifests[0].platform.os
+          } elseif ($manifest.os) {
+            $os = $manifest.os
+          } else {
+            Write-Host "Unable to determine OS from manifest, defaulting to linux"
+            $os = "linux"
+          }
+          Write-Host "Detected platform OS: $os"
+          if ($os -eq "windows") {
+            $poolName = "NautilusRelease"
+            $demandBUS = "azureps"
+            $demandENG = "azureps"
+          } else {
+            $poolName = "Tiberius"
+            $demandBUS = "ENVIRONMENT -equals BUS"
+            $demandENG = "ENVIRONMENT -equals ENG"
+          }
+          Write-Host "##vso[task.setvariable variable=os;isOutput=true]$os"
+          Write-Host "##vso[task.setvariable variable=poolName;isOutput=true]$poolName"
+          Write-Host "##vso[task.setvariable variable=demandBUS;isOutput=true]$demandBUS"
+          Write-Host "##vso[task.setvariable variable=demandENG;isOutput=true]$demandENG"
 
-    - task: UkhoSnykScanTask@0
-      displayName: 'Snyk container scan'
-      inputs:
-        failOnIssues: true
-        organization: '${{ parameters.snykOrganization }}'
-        serviceConnectionEndpoint: '${{ parameters.snykServiceConnection }}'
-        testType: container
-        monitorWhen: always
-        severityThreshold: high
-        dockerImageName: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}'
-
-- stage: PushToPreACR
-  displayName: 'Push scanned image to Pre ACR'
-  dependsOn: ScanContainer
-  condition: succeeded('ScanContainer')
+- stage: ScanContainer
+  displayName: 'Scan Container'
+  dependsOn: DetectPlatform
+  condition: succeeded('DetectPlatform')
+  variables:
+    poolName: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.poolName'] ]
+    agentDemand: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.demandBUS'] ]
   jobs:
-  - job: PushToPre
-    displayName: 'Push to Pre ACR'
+  - job: ContainerScan
+    displayName: 'Scan Pushed Image'
     pool:
-      ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
-        name: NautilusRelease
-      ${{ else }}:
-        name: Tiberius
-        demands:
-        - ENVIRONMENT -equals ENG
-    variables:
-      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
-      preImageRepository: 'scanned/${{ parameters.sourceRepository }}'
-      fullPreImageName: '${{ parameters.preRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+      name: $(poolName)
+      demands:
+      - $(agentDemand)
     steps:
-    - template: steps/docker-copy-image.yml
+    - template: steps/scan-container.yml
       parameters:
         sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
         sourceHost: '${{ parameters.sourceHost }}'
         sourceRepository: '${{ parameters.sourceRepository }}'
         sourceTag: '${{ parameters.sourceTag }}'
-        targetRegistryServiceConnection: '${{ parameters.preRegistryServiceConnection }}'
-        targetRegistryDisplayName: 'Login to Pre Registry'
-        targetImageName: '$(fullPreImageName)'
-        targetRepository: '$(preImageRepository)'
-        targetTag: '$(scannedImageTag)'
-        tagDisplayName: 'Tag Image for Pre'
-        pushDisplayName: 'Push Scanned Image to Pre Registry'
+        snykOrganization: '${{ parameters.snykOrganization }}'
+        snykServiceConnection: '${{ parameters.snykServiceConnection }}'
 
-- stage: PushToPrivateRepo
-  displayName: 'Push passed image to Live ACR'
-  dependsOn: PushToPreACR
-  condition: succeeded('PushToPreACR')
-  jobs:
-  - job: PullTagAndPush
-    displayName: 'Pull, Tag and Push the image to the Private ACR'
-    pool:
-      ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
-        name: NautilusRelease
-      ${{ else }}:
-        name: Tiberius
-        demands:
-        - ENVIRONMENT -equals BUS
-    variables:
-      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
-      destinationImageRepository: 'scanned/${{ parameters.sourceRepository }}'
-      fullDestinationImageName: '${{ parameters.destinationRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
-    steps:
-    - template: steps/docker-copy-image.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        targetRegistryServiceConnection: '${{ parameters.destinationRegistryServiceConnection }}'
-        targetRegistryDisplayName: 'Login to Destination Registry'
-        targetImageName: '$(fullDestinationImageName)'
-        targetRepository: '$(destinationImageRepository)'
-        targetTag: '$(scannedImageTag)'
-        tagDisplayName: 'Tag Image as Snyk Scanned'
-        pushDisplayName: 'Push Scanned Image to Destination Registry'
+- template: stages/push-scanned-image.yml
+  parameters:
+    stageName: PushToPreACR
+    stageDisplayName: 'Push scanned image to Pre ACR'
+    dependsOn:
+    - ScanContainer
+    condition: succeeded('ScanContainer')
+    environment: ENG
+    sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+    sourceHost: '${{ parameters.sourceHost }}'
+    sourceRepository: '${{ parameters.sourceRepository }}'
+    sourceTag: '${{ parameters.sourceTag }}'
+    targetRegistryServiceConnection: '${{ parameters.preRegistryServiceConnection }}'
+    targetRegistry: '${{ parameters.preRegistry }}'
+    targetRegistryDisplayName: 'Login to Pre Registry'
+    tagDisplayName: 'Tag Image for Pre'
+    pushDisplayName: 'Push Scanned Image to Pre Registry'
 
-- stage: PushToGlobalPreACR
-  displayName: 'Push scanned image to Global Pre ACR'
-  dependsOn: ScanContainer
-  condition: succeeded('ScanContainer')
-  jobs:
-  - job: PushToGlobalPre
-    displayName: 'Push to Global Pre ACR'
-    pool:
-      ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
-        name: NautilusRelease
-      ${{ else }}:
-        name: Tiberius
-        demands:
-        - ENVIRONMENT -equals ENG
-    variables:
-      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
-      globalPreImageRepository: 'scanned/${{ parameters.sourceRepository }}'
-      fullGlobalPreImageName: '${{ parameters.globalPreRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
-    steps:
-    - template: steps/docker-copy-image.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        targetRegistryServiceConnection: '${{ parameters.globalPreRegistryServiceConnection }}'
-        targetRegistryDisplayName: 'Login to Global Pre Registry'
-        targetImageName: '$(fullGlobalPreImageName)'
-        targetRepository: '$(globalPreImageRepository)'
-        targetTag: '$(scannedImageTag)'
-        tagDisplayName: 'Tag Image for Global Pre'
-        pushDisplayName: 'Push Scanned Image to Global Pre Registry'
+- template: stages/push-scanned-image.yml
+  parameters:
+    stageName: PushToPrivateRepo
+    stageDisplayName: 'Push passed image to Live ACR'
+    dependsOn:
+    - PushToPreACR
+    condition: succeeded('PushToPreACR')
+    environment: BUS
+    sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+    sourceHost: '${{ parameters.sourceHost }}'
+    sourceRepository: '${{ parameters.sourceRepository }}'
+    sourceTag: '${{ parameters.sourceTag }}'
+    targetRegistryServiceConnection: '${{ parameters.destinationRegistryServiceConnection }}'
+    targetRegistry: '${{ parameters.destinationRegistry }}'
+    targetRegistryDisplayName: 'Login to Destination Registry'
+    tagDisplayName: 'Tag Image as Snyk Scanned'
+    pushDisplayName: 'Push Scanned Image to Destination Registry'
 
-- stage: PushToGlobalLiveACR
-  displayName: 'Push scanned image to Global Live ACR'
-  dependsOn: PushToGlobalPreACR
-  condition: succeeded('PushToGlobalPreACR')
-  jobs:
-  - job: PushToGlobalLive
-    displayName: 'Push to Global Live ACR'
-    pool:
-      ${{ if startsWith(parameters.sourceRepository, 'windows/') }}:
-        name: NautilusRelease
-      ${{ else }}:
-        name: Tiberius
-        demands:
-        - ENVIRONMENT -equals BUS
-    variables:
-      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
-      globalLiveImageRepository: 'scanned/${{ parameters.sourceRepository }}'
-      fullGlobalLiveImageName: '${{ parameters.globalLiveRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
-    steps:
-    - template: steps/docker-copy-image.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        targetRegistryServiceConnection: '${{ parameters.globalLiveRegistryServiceConnection }}'
-        targetRegistryDisplayName: 'Login to Global Live Registry'
-        targetImageName: '$(fullGlobalLiveImageName)'
-        targetRepository: '$(globalLiveImageRepository)'
-        targetTag: '$(scannedImageTag)'
-        tagDisplayName: 'Tag Image for Global Live'
-        pushDisplayName: 'Push Scanned Image to Global Live Registry'
+- template: stages/push-scanned-image.yml
+  parameters:
+    stageName: PushToGlobalPreACR
+    stageDisplayName: 'Push scanned image to Global Pre ACR'
+    dependsOn:
+    - ScanContainer
+    condition: succeeded('ScanContainer')
+    environment: ENG
+    sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+    sourceHost: '${{ parameters.sourceHost }}'
+    sourceRepository: '${{ parameters.sourceRepository }}'
+    sourceTag: '${{ parameters.sourceTag }}'
+    targetRegistryServiceConnection: '${{ parameters.globalPreRegistryServiceConnection }}'
+    targetRegistry: '${{ parameters.globalPreRegistry }}'
+    targetRegistryDisplayName: 'Login to Global Pre Registry'
+    tagDisplayName: 'Tag Image for Global Pre'
+    pushDisplayName: 'Push Scanned Image to Global Pre Registry'
+
+- template: stages/push-scanned-image.yml
+  parameters:
+    stageName: PushToGlobalLiveACR
+    stageDisplayName: 'Push scanned image to Global Live ACR'
+    dependsOn:
+    - PushToGlobalPreACR
+    condition: succeeded('PushToGlobalPreACR')
+    environment: BUS
+    sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+    sourceHost: '${{ parameters.sourceHost }}'
+    sourceRepository: '${{ parameters.sourceRepository }}'
+    sourceTag: '${{ parameters.sourceTag }}'
+    targetRegistryServiceConnection: '${{ parameters.globalLiveRegistryServiceConnection }}'
+    targetRegistry: '${{ parameters.globalLiveRegistry }}'
+    targetRegistryDisplayName: 'Login to Global Live Registry'
+    tagDisplayName: 'Tag Image for Global Live'
+    pushDisplayName: 'Push Scanned Image to Global Live Registry'
 
 - stage: AlertOnSuccess
   displayName: 'Alert that scan completed successfully'
