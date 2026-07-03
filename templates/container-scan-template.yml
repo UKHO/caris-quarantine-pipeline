@@ -59,15 +59,25 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          $manifest = docker manifest inspect ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} | ConvertFrom-Json
+          $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
+          $manifest = docker manifest inspect $image | ConvertFrom-Json
+
           if ($manifest.manifests) {
+            # Multi-arch manifest list
             $os = $manifest.manifests[0].platform.os
-          } elseif ($manifest.os) {
-            $os = $manifest.os
           } else {
-            Write-Host "Unable to determine OS from manifest, defaulting to linux"
+            # Single-platform manifest - need to pull config blob for OS info
+            Write-Host "Single-platform manifest detected, inspecting image config..."
+            docker pull $image
+            $inspect = docker inspect $image | ConvertFrom-Json
+            $os = $inspect[0].Os
+          }
+
+          if (-not $os) {
+            Write-Host "Unable to determine OS, defaulting to linux"
             $os = "linux"
           }
+
           Write-Host "Detected platform OS: $os"
           if ($os -eq "windows") {
             $poolName = "NautilusRelease"
