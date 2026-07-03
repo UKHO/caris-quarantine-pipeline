@@ -33,12 +33,11 @@ parameters:
     type: string
 
 stages:
-- stage: DetectPlatform
-  displayName: 'Detect Image Platform'
-  condition: succeeded()
+- stage: ScanContainer
+  displayName: 'Scan Container'
   jobs:
   - job: Detect
-    displayName: 'Query image platform from registry'
+    displayName: 'Detect image platform'
     pool:
       name: Tiberius
       demands:
@@ -104,16 +103,10 @@ stages:
           Write-Host "##vso[task.setvariable variable=os;isOutput=true]$os"
           exit 0
 
-- stage: ScanContainer
-  displayName: 'Scan Container'
-  dependsOn: DetectPlatform
-  condition: succeeded('DetectPlatform')
-  variables:
-    detectedOS: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.os'] ]
-  jobs:
   - job: ContainerScanWindows
     displayName: 'Scan Pushed Image (Windows)'
-    condition: eq(variables['detectedOS'], 'windows')
+    dependsOn: Detect
+    condition: eq(dependencies.Detect.outputs['platform.os'], 'windows')
     pool:
       name: NautilusRelease
     steps:
@@ -128,7 +121,8 @@ stages:
 
   - job: ContainerScanLinux
     displayName: 'Scan Pushed Image (Linux)'
-    condition: ne(variables['detectedOS'], 'windows')
+    dependsOn: Detect
+    condition: ne(dependencies.Detect.outputs['platform.os'], 'windows')
     pool:
       name: Tiberius
       demands:

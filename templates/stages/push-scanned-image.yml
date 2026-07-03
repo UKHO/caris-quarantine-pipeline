@@ -35,12 +35,12 @@ stages:
 - stage: ${{ parameters.stageName }}
   displayName: '${{ parameters.stageDisplayName }}'
   dependsOn:
-  - DetectPlatform
+  - ScanContainer
   - ${{ each dep in parameters.dependsOn }}:
     - ${{ dep }}
   condition: ${{ parameters.condition }}
   variables:
-    detectedOS: $[ stageDependencies.DetectPlatform.Detect.outputs['platform.os'] ]
+    detectedOS: $[ stageDependencies.ScanContainer.Detect.outputs['platform.os'] ]
   jobs:
   - job: PushWindows
     displayName: '${{ parameters.stageDisplayName }} (Windows)'
