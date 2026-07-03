@@ -59,18 +59,50 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
-          $manifest = docker manifest inspect $image | ConvertFrom-Json
+          $registry = "${{ parameters.sourceHost }}"
+          $repository = "${{ parameters.sourceRepository }}"
+          $tag = "${{ parameters.sourceTag }}"
 
+          # Get refresh token from Docker config
+          $dockerConfig = Get-Content "$env:HOME/.docker/config.json" -ErrorAction SilentlyContinue | ConvertFrom-Json
+          if (-not $dockerConfig) {
+            $dockerConfig = Get-Content "$env:USERPROFILE/.docker/config.json" -ErrorAction SilentlyContinue | ConvertFrom-Json
+          }
+
+          # Exchange Docker credentials for a registry access token
+          $authHeader = $null
+          if ($dockerConfig.auths.$registry.auth) {
+            $authHeader = @{ "Authorization" = "Basic $($dockerConfig.auths.$registry.auth)" }
+          }
+
+          $tokenUri = "https://$registry/oauth2/token?service=$registry&scope=repository:${repository}:pull"
+          $tokenResponse = Invoke-RestMethod -Uri $tokenUri -Method GET -Headers $authHeader
+          $token = $tokenResponse.access_token
+
+          $headers = @{
+            "Authorization" = "Bearer $token"
+            "Accept" = "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json"
+          }
+
+          # Fetch the manifest
+          $manifest = Invoke-RestMethod -Uri "https://$registry/v2/$repository/manifests/$tag" -Headers $headers
+
+          # Determine OS from manifest
+          $os = $null
           if ($manifest.manifests) {
-            # Multi-arch manifest list
+            # Manifest list / OCI index
             $os = $manifest.manifests[0].platform.os
+            Write-Host "Manifest list detected, OS from first entry: $os"
           } else {
-            # Single-platform manifest - need to pull config blob for OS info
-            Write-Host "Single-platform manifest detected, inspecting image config..."
-            docker pull $image
-            $inspect = docker inspect $image | ConvertFrom-Json
-            $os = $inspect[0].Os
+            # Single-platform manifest - fetch the config blob for OS info
+            $configDigest = $manifest.config.digest
+            Write-Host "Single-platform manifest, fetching config blob: $configDigest"
+            $configHeaders = @{
+              "Authorization" = "Bearer $token"
+            }
+            $config = Invoke-RestMethod -Uri "https://$registry/v2/$repository/blobs/$configDigest" -Headers $configHeaders
+            $os = $config.os
+            Write-Host "OS from config blob: $os"
           }
 
           if (-not $os) {
