@@ -103,8 +103,8 @@ stages:
           Write-Host "Detected platform OS: $os"
           if ($os -eq "windows") {
             $poolName = "NautilusRelease"
-            $demandBUS = "ENVIRONMENT -equals BUS"
-            $demandENG = "ENVIRONMENT -equals ENG"
+            $demandBUS = "azureps"
+            $demandENG = "azureps"
           } else {
             $poolName = "Tiberius"
             $demandBUS = "ENVIRONMENT -equals BUS"
