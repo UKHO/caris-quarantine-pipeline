@@ -1,0 +1,95 @@
+parameters:
+  - name: stageName
+    type: string
+  - name: stageDisplayName
+    type: string
+  - name: dependsOn
+    type: object
+  - name: condition
+    type: string
+  - name: environment
+    type: string
+    values:
+    - BUS
+    - ENG
+  - name: sourceRegistryServiceConnection
+    type: string
+  - name: sourceHost
+    type: string
+  - name: sourceRepository
+    type: string
+  - name: sourceTag
+    type: string
+  - name: targetRegistryServiceConnection
+    type: string
+  - name: targetRegistry
+    type: string
+  - name: targetRegistryDisplayName
+    type: string
+  - name: tagDisplayName
+    type: string
+  - name: pushDisplayName
+    type: string
+
+stages:
+- stage: ${{ parameters.stageName }}
+  displayName: '${{ parameters.stageDisplayName }}'
+  dependsOn:
+  - ScanContainer
+  - ${{ each dep in parameters.dependsOn }}:
+    - ${{ dep }}
+  condition: ${{ parameters.condition }}
+  variables:
+    detectedOS: $[ stageDependencies.ScanContainer.Detect.outputs['platform.os'] ]
+  jobs:
+  - job: PushWindows
+    displayName: '${{ parameters.stageDisplayName }} (Windows)'
+    condition: eq(variables['detectedOS'], 'windows')
+    pool:
+      name: NautilusRelease
+      demands:
+      - ukho.osbuildtag -equals ltsc2022
+    variables:
+      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
+      imageRepository: 'scanned/${{ parameters.sourceRepository }}'
+      fullImageName: '${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+    steps:
+    - template: ../steps/docker-copy-image.yml
+      parameters:
+        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        targetRegistryServiceConnection: '${{ parameters.targetRegistryServiceConnection }}'
+        targetRegistryDisplayName: '${{ parameters.targetRegistryDisplayName }}'
+        targetImageName: '$(fullImageName)'
+        targetRepository: '$(imageRepository)'
+        targetTag: '$(scannedImageTag)'
+        tagDisplayName: '${{ parameters.tagDisplayName }}'
+        pushDisplayName: '${{ parameters.pushDisplayName }}'
+
+  - job: PushLinux
+    displayName: '${{ parameters.stageDisplayName }} (Linux)'
+    condition: ne(variables['detectedOS'], 'windows')
+    pool:
+      name: Tiberius
+      demands:
+      - ENVIRONMENT -equals ${{ parameters.environment }}
+    variables:
+      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
+      imageRepository: 'scanned/${{ parameters.sourceRepository }}'
+      fullImageName: '${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+    steps:
+    - template: ../steps/docker-copy-image.yml
+      parameters:
+        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+        sourceHost: '${{ parameters.sourceHost }}'
+        sourceRepository: '${{ parameters.sourceRepository }}'
+        sourceTag: '${{ parameters.sourceTag }}'
+        targetRegistryServiceConnection: '${{ parameters.targetRegistryServiceConnection }}'
+        targetRegistryDisplayName: '${{ parameters.targetRegistryDisplayName }}'
+        targetImageName: '$(fullImageName)'
+        targetRepository: '$(imageRepository)'
+        targetTag: '$(scannedImageTag)'
+        tagDisplayName: '${{ parameters.tagDisplayName }}'
+        pushDisplayName: '${{ parameters.pushDisplayName }}'
