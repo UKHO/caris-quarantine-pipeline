@@ -120,7 +120,7 @@ stages:
     stageDisplayName: 'Push scanned image to Pre ACR'
     dependsOn:
     - ScanContainer
-    condition: succeeded('ScanContainer')
+    condition: and(succeeded('ScanContainer'), ne(stageDependencies.ScanContainer.Detect.outputs['validation.skipPipeline'], 'true'))
     environment: ENG
     sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
     sourceHost: '${{ parameters.sourceHost }}'
@@ -156,7 +156,7 @@ stages:
     stageDisplayName: 'Push scanned image to Global Pre ACR'
     dependsOn:
     - ScanContainer
-    condition: succeeded('ScanContainer')
+    condition: and(succeeded('ScanContainer'), ne(stageDependencies.ScanContainer.Detect.outputs['validation.skipPipeline'], 'true'))
     environment: ENG
     sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
     sourceHost: '${{ parameters.sourceHost }}'
