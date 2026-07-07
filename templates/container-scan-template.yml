@@ -58,7 +58,7 @@ stages:
   - job: ContainerScanWindows
     displayName: 'Scan Pushed Image (Windows)'
     dependsOn: Detect
-    condition: eq(dependencies.Detect.outputs['platform.os'], 'windows')
+    condition: and(succeeded(), eq(dependencies.Detect.outputs['platform.os'], 'windows'))
     pool:
       name: NautilusRelease
       demands:
@@ -76,7 +76,7 @@ stages:
   - job: ContainerScanLinux
     displayName: 'Scan Pushed Image (Linux)'
     dependsOn: Detect
-    condition: ne(dependencies.Detect.outputs['platform.os'], 'windows')
+    condition: and(succeeded(), ne(dependencies.Detect.outputs['platform.os'], 'windows'))
     pool:
       name: Tiberius
       demands:
