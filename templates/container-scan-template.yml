@@ -54,9 +54,11 @@ stages:
         Write-Host "Webhook tag='$tag', repository='$repository', registry='$registry'"
 
         if (-not $tag -or $tag -eq 'None') {
-          Write-Host "##[warning]No tag in webhook payload (child manifest of multi-arch image) - skipping pipeline"
+          Write-Host "##[warning]No tag in webhook payload (child manifest of multi-arch image) - cancelling pipeline"
           Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]true"
           Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]"
+          Write-Host "##vso[task.complete result=Canceled;]No tag - child manifest of multi-arch image"
+          exit 0
         } else {
           Write-Host "Tag: $tag"
           Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]false"
