@@ -19,7 +19,15 @@ steps:
     inlineScript: |
       $registry = "${{ parameters.sourceHost }}"
       $repository = "${{ parameters.sourceRepository }}"
-      $tag = "${{ parameters.sourceTag }}"
+      $paramTag = "${{ parameters.sourceTag }}"
+      $resolved = "$(validation.resolvedTag)"
+      if ($resolved -and $resolved -ne 'None' -and $resolved -notmatch '^\$\(') {
+        $tag = $resolved
+      } elseif ($paramTag -and $paramTag -ne 'None') {
+        $tag = $paramTag
+      } else {
+        $tag = ""
+      }
       $acrName = $registry -replace '\.azurecr\.io$',''
 
       Write-Host "Detecting platform for ${registry}/${repository}:${tag}"
