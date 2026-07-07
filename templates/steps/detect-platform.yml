@@ -12,6 +12,7 @@ steps:
 - task: AzureCLI@2
   displayName: 'Detect platform from manifest'
   name: platform
+  condition: ne(variables['validation.skipPipeline'], 'true')
   inputs:
     azureSubscription: '${{ parameters.sourceAzureSubscription }}'
     scriptType: pscore
