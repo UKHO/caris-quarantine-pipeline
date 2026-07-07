@@ -124,153 +124,154 @@ stages:
           Write-Host "Helm scan outcome: $scanOutcome"
           Write-Host "##vso[task.setvariable variable=helmScanOutcome;isOutput=true]$scanOutcome"
 
-- stage: PushHelmToPreACRs
-  displayName: 'Push scanned Helm chart to Pre ACRs'
-  dependsOn: ScanHelmChart
-  condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'clean')
-  jobs:
-  - job: PushHelmToPreRegistries
-    displayName: 'Push Helm Chart to Pre ACRs'
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals ENG
-    steps:
-    - template: steps/azurecli-pscore.yml
-      parameters:
-        stepName: pullAndRepackage
-        displayName: 'Pull Helm Chart from Source and Repackage'
-        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        importHelmPipelineModule: true
-        inlineScript: |
-          $sourceRegistryHost = "${{ parameters.sourceHost }}"
-          $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
-          $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
-          
-          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-pre'
-          $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
-          Write-Host "Pulling Helm chart: $chartReference"
-          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
-          
-          $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-pre'
-          $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination $repackageDir.FullName
-          $chartVersion = Get-HelmChartVersion -ChartDirectory $chartPath
-          Write-Host "Chart version: $chartVersion"
-          
-          $scannedVersion = "$chartVersion-snyk-scanned"
-          Write-Host "Repackaging with version: $scannedVersion"
-          $repackagedChart = Invoke-HelmRepackageWithVersion -ChartDirectory $chartPath -NewVersion $scannedVersion -OutputDirectory $chartDir.FullName
-          
-          if (-not $repackagedChart) {
-            Write-Host "##[error]Unable to locate repackaged chart"
-            exit 1
-          }
-          Write-Host "Repackaged chart: $repackagedChart"
-          Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
+- ${{ if startsWith(parameters.sourceRepository, 'caris/charts/') }}:
+  - stage: PushHelmToPreACRs
+    displayName: 'Push scanned Helm chart to Pre ACRs'
+    dependsOn: ScanHelmChart
+    condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'clean')
+    jobs:
+    - job: PushHelmToPreRegistries
+      displayName: 'Push Helm Chart to Pre ACRs'
+      pool:
+        name: Tiberius
+        demands:
+        - ENVIRONMENT -equals ENG
+      steps:
+      - template: steps/azurecli-pscore.yml
+        parameters:
+          stepName: pullAndRepackage
+          displayName: 'Pull Helm Chart from Source and Repackage'
+          azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+          importHelmPipelineModule: true
+          inlineScript: |
+            $sourceRegistryHost = "${{ parameters.sourceHost }}"
+            $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
+            $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
+            
+            $chartDir = New-PipelineTempDirectory -Name 'helm-charts-pre'
+            $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
+            Write-Host "Pulling Helm chart: $chartReference"
+            $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
+            
+            $repackageDir = New-PipelineTempDirectory -Name 'helm-repackage-pre'
+            $chartPath = Expand-HelmChartArchive -ChartArchivePath $chartFile -Destination $repackageDir.FullName
+            $chartVersion = Get-HelmChartVersion -ChartDirectory $chartPath
+            Write-Host "Chart version: $chartVersion"
+            
+            $scannedVersion = "$chartVersion-snyk-scanned"
+            Write-Host "Repackaging with version: $scannedVersion"
+            $repackagedChart = Invoke-HelmRepackageWithVersion -ChartDirectory $chartPath -NewVersion $scannedVersion -OutputDirectory $chartDir.FullName
+            
+            if (-not $repackagedChart) {
+              Write-Host "##[error]Unable to locate repackaged chart"
+              exit 1
+            }
+            Write-Host "Repackaged chart: $repackagedChart"
+            Write-Host "##vso[task.setvariable variable=repackagedChartPath]$repackagedChart"
 
-    - template: steps/helm-push-to-acr.yml
-      parameters:
-        displayName: 'Push Helm Chart to Caris Pre ACR'
-        azureSubscription: '${{ parameters.preAzureSubscription }}'
-        registryHost: '${{ parameters.preRegistry }}'
-        repository: 'scanned/charts'
-        chartPath: '$(repackagedChartPath)'
+      - template: steps/helm-push-to-acr.yml
+        parameters:
+          displayName: 'Push Helm Chart to Caris Pre ACR'
+          azureSubscription: '${{ parameters.preAzureSubscription }}'
+          registryHost: '${{ parameters.preRegistry }}'
+          repository: 'scanned/charts'
+          chartPath: '$(repackagedChartPath)'
 
-    - template: steps/helm-push-to-acr.yml
-      parameters:
-        displayName: 'Push Helm Chart to Global Pre ACR'
-        azureSubscription: '${{ parameters.preAzureSubscription }}'
-        registryHost: '${{ parameters.globalPreRegistry }}'
-        repository: 'scanned/charts'
-        chartPath: '$(repackagedChartPath)'
+      - template: steps/helm-push-to-acr.yml
+        parameters:
+          displayName: 'Push Helm Chart to Global Pre ACR'
+          azureSubscription: '${{ parameters.preAzureSubscription }}'
+          registryHost: '${{ parameters.globalPreRegistry }}'
+          repository: 'scanned/charts'
+          chartPath: '$(repackagedChartPath)'
 
-- stage: PushHelmToLiveACRs
-  displayName: 'Push scanned Helm chart to Live ACRs'
-  dependsOn: PushHelmToPreACRs
-  condition: succeeded('PushHelmToPreACRs')
-  jobs:
-  - job: PushHelmToLiveRegistries
-    displayName: 'Push Helm Chart to Live ACRs'
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals BUS
-    steps:
-    - template: steps/azurecli-pscore.yml
-      parameters:
-        stepName: pullChart
-        displayName: 'Pull Helm Chart from Source'
-        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        importHelmPipelineModule: true
-        inlineScript: |
-          $sourceRegistryHost = "${{ parameters.sourceHost }}"
-          $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
-          $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
-          
-          $chartDir = New-PipelineTempDirectory -Name 'helm-charts-live'
-          $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
-          Write-Host "Pulling Helm chart: $chartReference"
-          $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
-          
-          Write-Host "Chart archive: $chartFile"
-          Write-Host "##vso[task.setvariable variable=chartArchivePath]$chartFile"
+  - stage: PushHelmToLiveACRs
+    displayName: 'Push scanned Helm chart to Live ACRs'
+    dependsOn: PushHelmToPreACRs
+    condition: succeeded('PushHelmToPreACRs')
+    jobs:
+    - job: PushHelmToLiveRegistries
+      displayName: 'Push Helm Chart to Live ACRs'
+      pool:
+        name: Tiberius
+        demands:
+        - ENVIRONMENT -equals BUS
+      steps:
+      - template: steps/azurecli-pscore.yml
+        parameters:
+          stepName: pullChart
+          displayName: 'Pull Helm Chart from Source'
+          azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+          importHelmPipelineModule: true
+          inlineScript: |
+            $sourceRegistryHost = "${{ parameters.sourceHost }}"
+            $sourceRegistryName = Get-AcrRegistryNameFromHost -RegistryHost $sourceRegistryHost
+            $accessToken = Get-AcrAccessToken -RegistryName $sourceRegistryName -RegistryHost $sourceRegistryHost
+            
+            $chartDir = New-PipelineTempDirectory -Name 'helm-charts-live'
+            $chartReference = "oci://$sourceRegistryHost/${{ parameters.sourceRepository }}"
+            Write-Host "Pulling Helm chart: $chartReference"
+            $chartFile = Get-HelmChartArchiveFromRegistry -RegistryHost $sourceRegistryHost -AccessToken $accessToken -ChartReference $chartReference -Destination $chartDir.FullName -ErrorMessage "Unable to locate pulled chart artifact"
+            
+            Write-Host "Chart archive: $chartFile"
+            Write-Host "##vso[task.setvariable variable=chartArchivePath]$chartFile"
 
-    - template: steps/helm-push-to-acr.yml
-      parameters:
-        displayName: 'Push Helm Chart to Caris Live ACR'
-        azureSubscription: '${{ parameters.liveAzureSubscription }}'
-        registryHost: '${{ parameters.destinationRegistry }}'
-        repository: 'scanned/charts'
-        chartPath: '$(chartArchivePath)'
+      - template: steps/helm-push-to-acr.yml
+        parameters:
+          displayName: 'Push Helm Chart to Caris Live ACR'
+          azureSubscription: '${{ parameters.liveAzureSubscription }}'
+          registryHost: '${{ parameters.destinationRegistry }}'
+          repository: 'scanned/charts'
+          chartPath: '$(chartArchivePath)'
 
-    - template: steps/helm-push-to-acr.yml
-      parameters:
-        displayName: 'Push Helm Chart to Global Live ACR'
-        azureSubscription: '${{ parameters.liveAzureSubscription }}'
-        registryHost: '${{ parameters.globalLiveRegistry }}'
-        repository: 'scanned/charts'
-        chartPath: '$(chartArchivePath)'
+      - template: steps/helm-push-to-acr.yml
+        parameters:
+          displayName: 'Push Helm Chart to Global Live ACR'
+          azureSubscription: '${{ parameters.liveAzureSubscription }}'
+          registryHost: '${{ parameters.globalLiveRegistry }}'
+          repository: 'scanned/charts'
+          chartPath: '$(chartArchivePath)'
 
-- stage: AlertOnHelmSuccess
-  displayName: 'Alert that Helm scan completed successfully'
-  dependsOn: [PushHelmToPreACRs, PushHelmToLiveACRs]
-  condition: and(succeeded('PushHelmToPreACRs'), succeeded('PushHelmToLiveACRs'))
-  jobs:
-  - job: SendHelmSuccessTeamsMessage
-    displayName: 'Send Helm Success Alert to Teams Channel'
-    pool: Mare Nectaris
-    steps:
-    - template: steps/send-teams-alert.yml
-      parameters:
-        teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
-        payload:
-          title: 'Helm Chart Scan Completed Successfully'
-          message: 'Helm chart scanning passed and chart has been pushed to all private registries.'
-          status: 'success'
-          sourceHost: '${{ parameters.sourceHost }}'
-          sourceRepository: '${{ parameters.sourceRepository }}'
-          destinationRegistry: '${{ parameters.destinationRegistry }}'
-          preRegistry: '${{ parameters.preRegistry }}'
-          globalPreRegistry: '${{ parameters.globalPreRegistry }}'
-          globalLiveRegistry: '${{ parameters.globalLiveRegistry }}'
-          pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
+  - stage: AlertOnHelmSuccess
+    displayName: 'Alert that Helm scan completed successfully'
+    dependsOn: [PushHelmToPreACRs, PushHelmToLiveACRs]
+    condition: and(succeeded('PushHelmToPreACRs'), succeeded('PushHelmToLiveACRs'))
+    jobs:
+    - job: SendHelmSuccessTeamsMessage
+      displayName: 'Send Helm Success Alert to Teams Channel'
+      pool: Mare Nectaris
+      steps:
+      - template: steps/send-teams-alert.yml
+        parameters:
+          teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
+          payload:
+            title: 'Helm Chart Scan Completed Successfully'
+            message: 'Helm chart scanning passed and chart has been pushed to all private registries.'
+            status: 'success'
+            sourceHost: '${{ parameters.sourceHost }}'
+            sourceRepository: '${{ parameters.sourceRepository }}'
+            destinationRegistry: '${{ parameters.destinationRegistry }}'
+            preRegistry: '${{ parameters.preRegistry }}'
+            globalPreRegistry: '${{ parameters.globalPreRegistry }}'
+            globalLiveRegistry: '${{ parameters.globalLiveRegistry }}'
+            pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
 
-- stage: AlertOnHelmFail
-  displayName: 'Alert that vulnerable Helm chart present'
-  dependsOn: ScanHelmChart
-  condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'vulnerable')
-  jobs:
-  - job: SendHelmFailureTeamsMessage
-    displayName: 'Send Helm Failure Alert to Teams Channel'
-    pool: Mare Nectaris
-    steps:
-    - template: steps/send-teams-alert.yml
-      parameters:
-        teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
-        payload:
-          title: 'Helm Chart Scan Failed'
-          message: 'Helm chart scanning failed due to vulnerabilities detected in chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}.'
-          status: 'failure'
-          sourceHost: '${{ parameters.sourceHost }}'
-          sourceRepository: '${{ parameters.sourceRepository }}'
-          pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
+  - stage: AlertOnHelmFail
+    displayName: 'Alert that vulnerable Helm chart present'
+    dependsOn: ScanHelmChart
+    condition: eq(dependencies.ScanHelmChart.outputs['HelmChartScan.setHelmScanOutcome.helmScanOutcome'], 'vulnerable')
+    jobs:
+    - job: SendHelmFailureTeamsMessage
+      displayName: 'Send Helm Failure Alert to Teams Channel'
+      pool: Mare Nectaris
+      steps:
+      - template: steps/send-teams-alert.yml
+        parameters:
+          teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
+          payload:
+            title: 'Helm Chart Scan Failed'
+            message: 'Helm chart scanning failed due to vulnerabilities detected in chart: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}.'
+            status: 'failure'
+            sourceHost: '${{ parameters.sourceHost }}'
+            sourceRepository: '${{ parameters.sourceRepository }}'
+            pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
