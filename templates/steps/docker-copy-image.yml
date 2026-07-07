@@ -37,7 +37,7 @@ steps:
     targetType: 'inline'
     script: |
       $resolved = "$(resolvedTag)"
-      if ($resolved -and $resolved -ne '$(resolvedTag)') {
+      if ($resolved -and $resolved -ne 'None' -and $resolved -notmatch '^\$\(') {
         $tag = $resolved
       } else {
         $tag = "${{ parameters.sourceTag }}"
@@ -60,7 +60,7 @@ steps:
     targetType: 'inline'
     script: |
       $resolved = "$(resolvedTag)"
-      if ($resolved -and $resolved -ne '$(resolvedTag)') {
+      if ($resolved -and $resolved -ne 'None' -and $resolved -notmatch '^\$\(') {
         $tag = $resolved
       } else {
         $tag = "${{ parameters.sourceTag }}"

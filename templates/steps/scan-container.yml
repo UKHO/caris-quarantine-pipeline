@@ -29,8 +29,8 @@ steps:
       Write-Host "DEBUG: resolvedTag variable = '$resolved'"
       Write-Host "DEBUG: sourceTag parameter = '$paramTag'"
 
-      # Use resolvedTag if it's a real value (not empty, not the literal macro, not None)
-      if ($resolved -and $resolved -ne '$(resolvedTag)' -and $resolved -ne 'None') {
+      # Determine the effective tag
+      if ($resolved -and $resolved -ne 'None' -and $resolved -notmatch '^\$\(') {
         $tag = $resolved
         Write-Host "Using resolved tag: $tag"
       } elseif ($paramTag -and $paramTag -ne 'None') {
