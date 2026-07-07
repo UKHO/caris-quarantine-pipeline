@@ -8,7 +8,6 @@ resources:
       filters:
         - path: target.mediaType
           value: "application/vnd.docker.distribution.manifest.list.v2+json"
-
 variables:
   - template: templates/common-variables.yml
 
