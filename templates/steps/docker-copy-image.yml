@@ -36,7 +36,12 @@ steps:
   inputs:
     targetType: 'inline'
     script: |
-      $tag = if ("$(resolvedTag)") { "$(resolvedTag)" } else { "${{ parameters.sourceTag }}" }
+      $resolved = "$(resolvedTag)"
+      if ($resolved -and $resolved -ne '$(resolvedTag)') {
+        $tag = $resolved
+      } else {
+        $tag = "${{ parameters.sourceTag }}"
+      }
       $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:$tag"
       Write-Host "Pulling image: $image"
       docker pull $image
@@ -54,7 +59,12 @@ steps:
   inputs:
     targetType: 'inline'
     script: |
-      $tag = if ("$(resolvedTag)") { "$(resolvedTag)" } else { "${{ parameters.sourceTag }}" }
+      $resolved = "$(resolvedTag)"
+      if ($resolved -and $resolved -ne '$(resolvedTag)') {
+        $tag = $resolved
+      } else {
+        $tag = "${{ parameters.sourceTag }}"
+      }
       $sourceImage = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:$tag"
       $targetImage = "${{ parameters.targetImageName }}"
       Write-Host "Tagging: $sourceImage -> $targetImage"

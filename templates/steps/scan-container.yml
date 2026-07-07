@@ -24,7 +24,13 @@ steps:
   inputs:
     targetType: 'inline'
     script: |
-      $tag = if ("$(resolvedTag)") { "$(resolvedTag)" } else { "${{ parameters.sourceTag }}" }
+      $resolved = "$(resolvedTag)"
+      # If variable wasn't set, Azure DevOps leaves it as literal '$(resolvedTag)'
+      if ($resolved -and $resolved -ne '$(resolvedTag)') {
+        $tag = $resolved
+      } else {
+        $tag = "${{ parameters.sourceTag }}"
+      }
       $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:$tag"
       Write-Host "Pulling image: $image"
       docker pull $image

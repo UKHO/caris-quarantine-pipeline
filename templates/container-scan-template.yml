@@ -60,35 +60,39 @@ stages:
           $registry = "${{ parameters.sourceHost }}"
           $acrName = $registry -replace '\.azurecr\.io$',''
 
+          Write-Host "Webhook tag='$tag', digest='$digest', repository='$repository'"
+
           if (-not $tag -or $tag -eq 'None') {
-            Write-Host "No tag in webhook payload, looking up tag from digest: $digest"
-            if ($digest) {
-              # Find which tags reference this digest (it's a child manifest of a manifest list)
-              $tagsJson = az acr manifest list-metadata --registry $acrName --name $repository --query "[?digest=='$digest' || contains(not_null(tags, ``[``), '*')].tags[]" --only-show-errors 2>&1
-              if ($LASTEXITCODE -ne 0) {
-                # Digest is a child manifest - find parent manifest list that references it
-                $allManifests = az acr manifest list-metadata --registry $acrName --name $repository --only-show-errors | ConvertFrom-Json
-                foreach ($m in $allManifests) {
-                  if ($m.tags -and $m.tags.Count -gt 0) {
-                    # Check if this tagged manifest references our digest
-                    $manifestJson = az acr manifest show --registry $acrName --name "${repository}@$($m.digest)" --only-show-errors 2>&1
-                    if ($LASTEXITCODE -eq 0) {
-                      $manifest = $manifestJson | ConvertFrom-Json
-                      if ($manifest.manifests.digest -contains $digest) {
-                        $tag = $m.tags[0]
-                        Write-Host "Found parent tag: $tag (via manifest list $($m.digest))"
-                        break
-                      }
+            Write-Host "No tag in webhook payload, resolving from repository tags..."
+
+            # Get all tags for this repository sorted by time (most recent first)
+            $tagsJson = az acr repository show-tags --name $acrName --repository $repository --orderby time_desc --top 10 --only-show-errors 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              $tags = $tagsJson | ConvertFrom-Json
+              Write-Host "Available tags: $($tags -join ', ')"
+
+              if ($digest) {
+                # Find which tag's manifest list references our child digest
+                foreach ($candidateTag in $tags) {
+                  $manifestJson = az acr manifest show --registry $acrName --name "${repository}:${candidateTag}" --only-show-errors 2>&1
+                  if ($LASTEXITCODE -eq 0) {
+                    $manifest = $manifestJson | ConvertFrom-Json
+                    if ($manifest.manifests.digest -contains $digest) {
+                      $tag = $candidateTag
+                      Write-Host "Found parent tag: $tag (contains child digest $digest)"
+                      break
                     }
                   }
                 }
-              } else {
-                $tags = $tagsJson | ConvertFrom-Json
-                if ($tags -and $tags.Count -gt 0) {
-                  $tag = $tags[0]
-                  Write-Host "Found tag from digest: $tag"
-                }
               }
+
+              # If still no match by digest, use the most recent tag
+              if ((-not $tag -or $tag -eq 'None') -and $tags.Count -gt 0) {
+                $tag = $tags[0]
+                Write-Host "Using most recent tag: $tag"
+              }
+            } else {
+              Write-Host "WARNING: Failed to list tags: $tagsJson"
             }
           }
 
@@ -97,6 +101,7 @@ stages:
             Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]true"
             Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]"
           } else {
+            Write-Host "Resolved tag: $tag"
             Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]false"
             Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]$tag"
           }
