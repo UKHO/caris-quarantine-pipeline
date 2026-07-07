@@ -44,9 +44,17 @@ stages:
       - ENVIRONMENT -equals BUS
     steps:
     - powershell: |
-        $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) ${{ parameters.sourceTag }}"
+        $tag = "${{ parameters.sourceTag }}"
+        if (-not $tag -or $tag -eq 'None' -or $tag -eq '$(AcrWebhookTrigger.target.tag)') {
+          Write-Host "##[warning]No valid tag provided (likely a child manifest of multi-arch image) - skipping pipeline"
+          Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]true"
+        } else {
+          Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]false"
+        }
+        $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) $tag"
         Write-Host "##vso[build.updatebuildnumber]$name"
-      displayName: 'Set pipeline run name'
+      displayName: 'Validate tag and set pipeline run name'
+      name: validation
 
     - template: steps/detect-platform.yml
       parameters:
@@ -58,7 +66,7 @@ stages:
   - job: ContainerScanWindows
     displayName: 'Scan Pushed Image (Windows)'
     dependsOn: Detect
-    condition: and(succeeded(), eq(dependencies.Detect.outputs['platform.os'], 'windows'))
+    condition: and(succeeded(), ne(dependencies.Detect.outputs['validation.skipPipeline'], 'true'), eq(dependencies.Detect.outputs['platform.os'], 'windows'))
     pool:
       name: NautilusRelease
       demands:
@@ -76,7 +84,7 @@ stages:
   - job: ContainerScanLinux
     displayName: 'Scan Pushed Image (Linux)'
     dependsOn: Detect
-    condition: and(succeeded(), ne(dependencies.Detect.outputs['platform.os'], 'windows'))
+    condition: and(succeeded(), ne(dependencies.Detect.outputs['validation.skipPipeline'], 'true'), ne(dependencies.Detect.outputs['platform.os'], 'windows'))
     pool:
       name: Tiberius
       demands:
