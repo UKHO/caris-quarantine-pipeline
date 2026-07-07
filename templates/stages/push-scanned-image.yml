@@ -42,10 +42,11 @@ stages:
   variables:
     detectedOS: $[ stageDependencies.ScanContainer.Detect.outputs['platform.os'] ]
     resolvedTag: $[ stageDependencies.ScanContainer.Detect.outputs['validation.resolvedTag'] ]
+    skipPipeline: $[ stageDependencies.ScanContainer.Detect.outputs['validation.skipPipeline'] ]
   jobs:
   - job: PushWindows
     displayName: '${{ parameters.stageDisplayName }} (Windows)'
-    condition: eq(variables['detectedOS'], 'windows')
+    condition: and(ne(variables['skipPipeline'], 'true'), eq(variables['detectedOS'], 'windows'))
     pool:
       name: NautilusRelease
       demands:
@@ -72,7 +73,7 @@ stages:
 
   - job: PushLinux
     displayName: '${{ parameters.stageDisplayName }} (Linux)'
-    condition: ne(variables['detectedOS'], 'windows')
+    condition: and(ne(variables['skipPipeline'], 'true'), ne(variables['detectedOS'], 'windows'))
     pool:
       name: Tiberius
       demands:
