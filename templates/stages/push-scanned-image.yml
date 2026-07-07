@@ -41,6 +41,7 @@ stages:
   condition: ${{ parameters.condition }}
   variables:
     detectedOS: $[ stageDependencies.ScanContainer.Detect.outputs['platform.os'] ]
+    resolvedTag: $[ stageDependencies.ScanContainer.Detect.outputs['validation.resolvedTag'] ]
   jobs:
   - job: PushWindows
     displayName: '${{ parameters.stageDisplayName }} (Windows)'
@@ -50,9 +51,10 @@ stages:
       demands:
       - ukho.osbuildtag -equals ltsc2022
     variables:
-      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
+      effectiveTag: $[ coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}') ]
+      scannedImageTag: $[ format('{0}-snyk-scanned', coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}')) ]
       imageRepository: 'scanned/${{ parameters.sourceRepository }}'
-      fullImageName: '${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+      fullImageName: $[ format('${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:{0}-snyk-scanned', coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}')) ]
     steps:
     - template: ../steps/docker-copy-image.yml
       parameters:
@@ -76,9 +78,10 @@ stages:
       demands:
       - ENVIRONMENT -equals ${{ parameters.environment }}
     variables:
-      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
+      effectiveTag: $[ coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}') ]
+      scannedImageTag: $[ format('{0}-snyk-scanned', coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}')) ]
       imageRepository: 'scanned/${{ parameters.sourceRepository }}'
-      fullImageName: '${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+      fullImageName: $[ format('${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:{0}-snyk-scanned', coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}')) ]
     steps:
     - template: ../steps/docker-copy-image.yml
       parameters:

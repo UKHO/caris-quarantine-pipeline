@@ -36,7 +36,12 @@ steps:
   inputs:
     targetType: 'inline'
     script: |
-      docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
+      $tag = if ("$(resolvedTag)") { "$(resolvedTag)" } else { "${{ parameters.sourceTag }}" }
+      $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:$tag"
+      Write-Host "Pulling image: $image"
+      docker pull $image
+      if ($LASTEXITCODE -ne 0) { exit 1 }
+      Write-Host "##vso[task.setvariable variable=sourceImage]$image"
 
 - task: Docker@2
   displayName: '${{ parameters.targetRegistryDisplayName }}'
@@ -44,11 +49,17 @@ steps:
     containerRegistry: '${{ parameters.targetRegistryServiceConnection }}'
     command: 'login'
 
-- task: Docker@2
+- task: PowerShell@2
   displayName: '${{ parameters.tagDisplayName }}'
   inputs:
-    command: 'tag'
-    arguments: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }} ${{ parameters.targetImageName }}'
+    targetType: 'inline'
+    script: |
+      $tag = if ("$(resolvedTag)") { "$(resolvedTag)" } else { "${{ parameters.sourceTag }}" }
+      $sourceImage = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:$tag"
+      $targetImage = "${{ parameters.targetImageName }}"
+      Write-Host "Tagging: $sourceImage -> $targetImage"
+      docker tag $sourceImage $targetImage
+      if ($LASTEXITCODE -ne 0) { exit 1 }
 
 - task: Docker@2
   displayName: '${{ parameters.pushDisplayName }}'

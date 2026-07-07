@@ -19,6 +19,9 @@ parameters:
     type: string
   - name: sourceTag
     type: string
+  - name: sourceDigest
+    type: string
+    default: ''
   - name: sourceHost
     type: string
   - name: sourceAzureSubscription
@@ -43,18 +46,62 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     steps:
-    - powershell: |
-        $tag = "${{ parameters.sourceTag }}"
-        if (-not $tag -or $tag -eq 'None' -or $tag -eq '$(AcrWebhookTrigger.target.tag)') {
-          Write-Host "##[warning]No valid tag provided (likely a child manifest of multi-arch image) - skipping pipeline"
-          Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]true"
-        } else {
-          Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]false"
-        }
-        $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) $tag"
-        Write-Host "##vso[build.updatebuildnumber]$name"
+    - task: AzureCLI@2
       displayName: 'Validate tag and set pipeline run name'
       name: validation
+      inputs:
+        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
+        scriptType: pscore
+        scriptLocation: inlineScript
+        inlineScript: |
+          $tag = "${{ parameters.sourceTag }}"
+          $digest = "${{ parameters.sourceDigest }}"
+          $repository = "${{ parameters.sourceRepository }}"
+          $registry = "${{ parameters.sourceHost }}"
+          $acrName = $registry -replace '\.azurecr\.io$',''
+
+          if (-not $tag -or $tag -eq 'None') {
+            Write-Host "No tag in webhook payload, looking up tag from digest: $digest"
+            if ($digest) {
+              # Find which tags reference this digest (it's a child manifest of a manifest list)
+              $tagsJson = az acr manifest list-metadata --registry $acrName --name $repository --query "[?digest=='$digest' || contains(not_null(tags, ``[``), '*')].tags[]" --only-show-errors 2>&1
+              if ($LASTEXITCODE -ne 0) {
+                # Digest is a child manifest - find parent manifest list that references it
+                $allManifests = az acr manifest list-metadata --registry $acrName --name $repository --only-show-errors | ConvertFrom-Json
+                foreach ($m in $allManifests) {
+                  if ($m.tags -and $m.tags.Count -gt 0) {
+                    # Check if this tagged manifest references our digest
+                    $manifestJson = az acr manifest show --registry $acrName --name "${repository}@$($m.digest)" --only-show-errors 2>&1
+                    if ($LASTEXITCODE -eq 0) {
+                      $manifest = $manifestJson | ConvertFrom-Json
+                      if ($manifest.manifests.digest -contains $digest) {
+                        $tag = $m.tags[0]
+                        Write-Host "Found parent tag: $tag (via manifest list $($m.digest))"
+                        break
+                      }
+                    }
+                  }
+                }
+              } else {
+                $tags = $tagsJson | ConvertFrom-Json
+                if ($tags -and $tags.Count -gt 0) {
+                  $tag = $tags[0]
+                  Write-Host "Found tag from digest: $tag"
+                }
+              }
+            }
+          }
+
+          if (-not $tag -or $tag -eq 'None') {
+            Write-Host "##[warning]Unable to resolve a valid tag - skipping pipeline"
+            Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]true"
+            Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]"
+          } else {
+            Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]false"
+            Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]$tag"
+          }
+          $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) $tag"
+          Write-Host "##vso[build.updatebuildnumber]$name"
 
     - template: steps/detect-platform.yml
       parameters:
@@ -67,6 +114,8 @@ stages:
     displayName: 'Scan Pushed Image (Windows)'
     dependsOn: Detect
     condition: and(succeeded(), ne(dependencies.Detect.outputs['validation.skipPipeline'], 'true'), eq(dependencies.Detect.outputs['platform.os'], 'windows'))
+    variables:
+      resolvedTag: $[ dependencies.Detect.outputs['validation.resolvedTag'] ]
     pool:
       name: NautilusRelease
       demands:
@@ -85,6 +134,8 @@ stages:
     displayName: 'Scan Pushed Image (Linux)'
     dependsOn: Detect
     condition: and(succeeded(), ne(dependencies.Detect.outputs['validation.skipPipeline'], 'true'), ne(dependencies.Detect.outputs['platform.os'], 'windows'))
+    variables:
+      resolvedTag: $[ dependencies.Detect.outputs['validation.resolvedTag'] ]
     pool:
       name: Tiberius
       demands:
