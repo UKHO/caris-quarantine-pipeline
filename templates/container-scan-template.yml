@@ -46,67 +46,26 @@ stages:
       demands:
       - ENVIRONMENT -equals BUS
     steps:
-    - task: AzureCLI@2
+    - powershell: |
+        $tag = "${{ parameters.sourceTag }}"
+        $repository = "${{ parameters.sourceRepository }}"
+        $registry = "${{ parameters.sourceHost }}"
+
+        Write-Host "Webhook tag='$tag', repository='$repository', registry='$registry'"
+
+        if (-not $tag -or $tag -eq 'None') {
+          Write-Host "##[warning]No tag in webhook payload (child manifest of multi-arch image) - skipping pipeline"
+          Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]true"
+          Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]"
+        } else {
+          Write-Host "Tag: $tag"
+          Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]false"
+          Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]$tag"
+        }
+        $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) $tag"
+        Write-Host "##vso[build.updatebuildnumber]$name"
       displayName: 'Validate tag and set pipeline run name'
       name: validation
-      inputs:
-        azureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        scriptType: pscore
-        scriptLocation: inlineScript
-        inlineScript: |
-          $tag = "${{ parameters.sourceTag }}"
-          $digest = "${{ parameters.sourceDigest }}"
-          $repository = "${{ parameters.sourceRepository }}"
-          $registry = "${{ parameters.sourceHost }}"
-          $acrName = $registry -replace '\.azurecr\.io$',''
-
-          Write-Host "Webhook tag='$tag', digest='$digest', repository='$repository'"
-
-          if (-not $tag -or $tag -eq 'None') {
-            Write-Host "No tag in webhook payload, resolving from repository tags..."
-
-            # Get all tags for this repository sorted by time (most recent first)
-            $tagsJson = az acr repository show-tags --name $acrName --repository $repository --orderby time_desc --top 10 --only-show-errors 2>&1
-            if ($LASTEXITCODE -eq 0) {
-              $tags = $tagsJson | ConvertFrom-Json
-              Write-Host "Available tags: $($tags -join ', ')"
-
-              if ($digest) {
-                # Find which tag's manifest list references our child digest
-                foreach ($candidateTag in $tags) {
-                  $manifestJson = az acr manifest show --registry $acrName --name "${repository}:${candidateTag}" --only-show-errors 2>&1
-                  if ($LASTEXITCODE -eq 0) {
-                    $manifest = $manifestJson | ConvertFrom-Json
-                    if ($manifest.manifests.digest -contains $digest) {
-                      $tag = $candidateTag
-                      Write-Host "Found parent tag: $tag (contains child digest $digest)"
-                      break
-                    }
-                  }
-                }
-              }
-
-              # If still no match by digest, use the most recent tag
-              if ((-not $tag -or $tag -eq 'None') -and $tags.Count -gt 0) {
-                $tag = $tags[0]
-                Write-Host "Using most recent tag: $tag"
-              }
-            } else {
-              Write-Host "WARNING: Failed to list tags: $tagsJson"
-            }
-          }
-
-          if (-not $tag -or $tag -eq 'None') {
-            Write-Host "##[warning]Unable to resolve a valid tag - skipping pipeline"
-            Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]true"
-            Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]"
-          } else {
-            Write-Host "Resolved tag: $tag"
-            Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]false"
-            Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]$tag"
-          }
-          $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) $tag"
-          Write-Host "##vso[build.updatebuildnumber]$name"
 
     - template: steps/detect-platform.yml
       parameters:
