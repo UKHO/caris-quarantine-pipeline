@@ -53,18 +53,9 @@ stages:
 
         Write-Host "Webhook tag='$tag', repository='$repository', registry='$registry'"
 
-        if (-not $tag -or $tag -eq 'None') {
-          Write-Host "##[warning]No tag in webhook payload (child manifest of multi-arch image) - skipping pipeline"
-          Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]true"
-          Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]"
-        } else {
-          Write-Host "Tag: $tag"
-          Write-Host "##vso[task.setvariable variable=skipPipeline;isOutput=true]false"
-          Write-Host "##vso[task.setvariable variable=resolvedTag;isOutput=true]$tag"
-        }
         $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) $tag"
         Write-Host "##vso[build.updatebuildnumber]$name"
-      displayName: 'Validate tag and set pipeline run name'
+      displayName: 'Set pipeline run name'
       name: validation
 
     - template: steps/detect-platform.yml
@@ -77,9 +68,7 @@ stages:
   - job: ContainerScanWindows
     displayName: 'Scan Pushed Image (Windows)'
     dependsOn: Detect
-    condition: and(succeeded(), ne(dependencies.Detect.outputs['validation.skipPipeline'], 'true'), eq(dependencies.Detect.outputs['platform.os'], 'windows'))
-    variables:
-      resolvedTag: $[ dependencies.Detect.outputs['validation.resolvedTag'] ]
+    condition: and(succeeded(), eq(dependencies.Detect.outputs['platform.os'], 'windows'))
     pool:
       name: NautilusRelease
       demands:
@@ -97,9 +86,7 @@ stages:
   - job: ContainerScanLinux
     displayName: 'Scan Pushed Image (Linux)'
     dependsOn: Detect
-    condition: and(succeeded(), ne(dependencies.Detect.outputs['validation.skipPipeline'], 'true'), ne(dependencies.Detect.outputs['platform.os'], 'windows'))
-    variables:
-      resolvedTag: $[ dependencies.Detect.outputs['validation.resolvedTag'] ]
+    condition: and(succeeded(), ne(dependencies.Detect.outputs['platform.os'], 'windows'))
     pool:
       name: Tiberius
       demands:

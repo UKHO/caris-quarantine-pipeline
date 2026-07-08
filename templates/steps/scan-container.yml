@@ -24,23 +24,7 @@ steps:
   inputs:
     targetType: 'inline'
     script: |
-      $resolved = "$(resolvedTag)"
-      $paramTag = "${{ parameters.sourceTag }}"
-      Write-Host "DEBUG: resolvedTag variable = '$resolved'"
-      Write-Host "DEBUG: sourceTag parameter = '$paramTag'"
-
-      # Determine the effective tag
-      if ($resolved -and $resolved -ne 'None' -and $resolved -notmatch '^\$\(') {
-        $tag = $resolved
-        Write-Host "Using resolved tag: $tag"
-      } elseif ($paramTag -and $paramTag -ne 'None') {
-        $tag = $paramTag
-        Write-Host "Using parameter tag: $tag"
-      } else {
-        Write-Host "##[error]No valid tag available. resolvedTag='$resolved', paramTag='$paramTag'"
-        exit 1
-      }
-      $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:$tag"
+      $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
       Write-Host "Pulling image: $image"
       docker pull $image
       if ($LASTEXITCODE -ne 0) { exit 1 }

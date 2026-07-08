@@ -41,21 +41,18 @@ stages:
   condition: ${{ parameters.condition }}
   variables:
     detectedOS: $[ stageDependencies.ScanContainer.Detect.outputs['platform.os'] ]
-    resolvedTag: $[ stageDependencies.ScanContainer.Detect.outputs['validation.resolvedTag'] ]
-    skipPipeline: $[ stageDependencies.ScanContainer.Detect.outputs['validation.skipPipeline'] ]
   jobs:
   - job: PushWindows
     displayName: '${{ parameters.stageDisplayName }} (Windows)'
-    condition: and(ne(variables['skipPipeline'], 'true'), eq(variables['detectedOS'], 'windows'))
+    condition: eq(variables['detectedOS'], 'windows')
     pool:
       name: NautilusRelease
       demands:
       - ukho.osbuildtag -equals ltsc2022
     variables:
-      effectiveTag: $[ coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}') ]
-      scannedImageTag: $[ format('{0}-snyk-scanned', coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}')) ]
+      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       imageRepository: 'scanned/${{ parameters.sourceRepository }}'
-      fullImageName: $[ format('${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:{0}-snyk-scanned', coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}')) ]
+      fullImageName: '${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
     steps:
     - template: ../steps/docker-copy-image.yml
       parameters:
@@ -73,16 +70,15 @@ stages:
 
   - job: PushLinux
     displayName: '${{ parameters.stageDisplayName }} (Linux)'
-    condition: and(ne(variables['skipPipeline'], 'true'), ne(variables['detectedOS'], 'windows'))
+    condition: ne(variables['detectedOS'], 'windows')
     pool:
       name: Tiberius
       demands:
       - ENVIRONMENT -equals ${{ parameters.environment }}
     variables:
-      effectiveTag: $[ coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}') ]
-      scannedImageTag: $[ format('{0}-snyk-scanned', coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}')) ]
+      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
       imageRepository: 'scanned/${{ parameters.sourceRepository }}'
-      fullImageName: $[ format('${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:{0}-snyk-scanned', coalesce(variables['resolvedTag'], '${{ parameters.sourceTag }}')) ]
+      fullImageName: '${{ parameters.targetRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
     steps:
     - template: ../steps/docker-copy-image.yml
       parameters:

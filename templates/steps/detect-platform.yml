@@ -12,7 +12,6 @@ steps:
 - task: AzureCLI@2
   displayName: 'Detect platform from manifest'
   name: platform
-  condition: ne(variables['validation.skipPipeline'], 'true')
   inputs:
     azureSubscription: '${{ parameters.sourceAzureSubscription }}'
     scriptType: pscore
@@ -20,15 +19,7 @@ steps:
     inlineScript: |
       $registry = "${{ parameters.sourceHost }}"
       $repository = "${{ parameters.sourceRepository }}"
-      $paramTag = "${{ parameters.sourceTag }}"
-      $resolved = "$(validation.resolvedTag)"
-      if ($resolved -and $resolved -ne 'None' -and $resolved -notmatch '^\$\(') {
-        $tag = $resolved
-      } elseif ($paramTag -and $paramTag -ne 'None') {
-        $tag = $paramTag
-      } else {
-        $tag = ""
-      }
+      $tag = "${{ parameters.sourceTag }}"
       $acrName = $registry -replace '\.azurecr\.io$',''
 
       Write-Host "Detecting platform for ${registry}/${repository}:${tag}"
