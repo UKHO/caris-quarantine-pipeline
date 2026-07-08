@@ -58,48 +58,50 @@ stages:
       displayName: 'Set pipeline run name'
       name: validation
 
-    - template: steps/detect-platform.yml
-      parameters:
-        sourceAzureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
+    - ${{ if ne(parameters.sourceTag, '') }}:
+      - template: steps/detect-platform.yml
+        parameters:
+          sourceAzureSubscription: '${{ parameters.sourceAzureSubscription }}'
+          sourceHost: '${{ parameters.sourceHost }}'
+          sourceRepository: '${{ parameters.sourceRepository }}'
+          sourceTag: '${{ parameters.sourceTag }}'
 
-  - job: ContainerScanWindows
-    displayName: 'Scan Pushed Image (Windows)'
-    dependsOn: Detect
-    condition: and(succeeded(), eq(dependencies.Detect.outputs['platform.os'], 'windows'))
-    pool:
-      name: NautilusRelease
-      demands:
-      - ukho.osbuildtag -equals ltsc2022
-    steps:
-    - template: steps/scan-container.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        snykOrganization: '${{ parameters.snykOrganization }}'
-        snykServiceConnection: '${{ parameters.snykServiceConnection }}'
+  - ${{ if ne(parameters.sourceTag, '') }}:
+    - job: ContainerScanWindows
+      displayName: 'Scan Pushed Image (Windows)'
+      dependsOn: Detect
+      condition: and(succeeded(), eq(dependencies.Detect.outputs['platform.os'], 'windows'))
+      pool:
+        name: NautilusRelease
+        demands:
+        - ukho.osbuildtag -equals ltsc2022
+      steps:
+      - template: steps/scan-container.yml
+        parameters:
+          sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+          sourceHost: '${{ parameters.sourceHost }}'
+          sourceRepository: '${{ parameters.sourceRepository }}'
+          sourceTag: '${{ parameters.sourceTag }}'
+          snykOrganization: '${{ parameters.snykOrganization }}'
+          snykServiceConnection: '${{ parameters.snykServiceConnection }}'
 
-  - job: ContainerScanLinux
-    displayName: 'Scan Pushed Image (Linux)'
-    dependsOn: Detect
-    condition: and(succeeded(), ne(dependencies.Detect.outputs['platform.os'], 'windows'))
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals BUS
-    steps:
-    - template: steps/scan-container.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        snykOrganization: '${{ parameters.snykOrganization }}'
-        snykServiceConnection: '${{ parameters.snykServiceConnection }}'
+    - job: ContainerScanLinux
+      displayName: 'Scan Pushed Image (Linux)'
+      dependsOn: Detect
+      condition: and(succeeded(), ne(dependencies.Detect.outputs['platform.os'], 'windows'))
+      pool:
+        name: Tiberius
+        demands:
+        - ENVIRONMENT -equals BUS
+      steps:
+      - template: steps/scan-container.yml
+        parameters:
+          sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+          sourceHost: '${{ parameters.sourceHost }}'
+          sourceRepository: '${{ parameters.sourceRepository }}'
+          sourceTag: '${{ parameters.sourceTag }}'
+          snykOrganization: '${{ parameters.snykOrganization }}'
+          snykServiceConnection: '${{ parameters.snykServiceConnection }}'
 
 - ${{ if ne(parameters.sourceTag, '') }}:
   - template: stages/push-scanned-image.yml
