@@ -20,39 +20,84 @@ steps:
       $registry = "${{ parameters.sourceHost }}"
       $repository = "${{ parameters.sourceRepository }}"
       $tag = "${{ parameters.sourceTag }}"
-
-      # Get ACR access token via Azure CLI (authenticated by service connection)
       $acrName = $registry -replace '\.azurecr\.io$',''
-      $refreshToken = (az acr login --name $acrName --expose-token --only-show-errors | ConvertFrom-Json).accessToken
-      $body = @{
-        grant_type = "refresh_token"
-        service = $registry
-        scope = "repository:${repository}:pull"
-        refresh_token = $refreshToken
-      }
-      $token = (Invoke-RestMethod -Uri "https://$registry/oauth2/token" -Method POST -Body $body).access_token
 
-      $manifestHeaders = @{
-        "Authorization" = "Bearer $token"
-        "Accept" = "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json"
-      }
+      Write-Host "Detecting platform for ${registry}/${repository}:${tag}"
 
-      # Fetch the manifest
-      $manifest = Invoke-RestMethod -Uri "https://$registry/v2/$repository/manifests/$tag" -Headers $manifestHeaders
-
-      # Determine OS from manifest
       $os = $null
-      if ($manifest.manifests) {
-        $os = $manifest.manifests[0].platform.os
-        Write-Host "Manifest list detected, OS from first entry: $os"
-      } else {
-        # Single-platform manifest - fetch the config blob for OS info
-        $configDigest = $manifest.config.digest
-        Write-Host "Single-platform manifest, fetching config blob: $configDigest"
-        $blobHeaders = @{ "Authorization" = "Bearer $token" }
-        $config = Invoke-RestMethod -Uri "https://$registry/v2/$repository/blobs/$configDigest" -Headers $blobHeaders
-        $os = $config.os
-        Write-Host "OS from config blob: $os"
+
+      # Try az acr manifest show first (handles auth via service connection)
+      try {
+        $manifestJson = az acr manifest show --registry $acrName --name "${repository}:${tag}" --only-show-errors 2>&1
+        if ($LASTEXITCODE -eq 0) {
+          $manifest = $manifestJson | ConvertFrom-Json
+          if ($manifest.manifests) {
+            # Skip attestation manifests (os=unknown) and pick first real platform
+            $platformEntry = $manifest.manifests | Where-Object { $_.platform.os -and $_.platform.os -ne 'unknown' } | Select-Object -First 1
+            if ($platformEntry) {
+              $os = $platformEntry.platform.os
+              Write-Host "Manifest list detected, OS: $os"
+            }
+          } elseif ($manifest.config.digest) {
+            # Single-platform manifest - fetch config blob via REST with CLI token
+            $configDigest = $manifest.config.digest
+            Write-Host "Single-platform manifest, fetching config blob: $configDigest"
+            $loginResult = az acr login --name $acrName --expose-token --only-show-errors | ConvertFrom-Json
+            $refreshToken = $loginResult.accessToken
+            $body = @{
+              grant_type = "refresh_token"
+              service = $registry
+              scope = "repository:${repository}:pull"
+              refresh_token = $refreshToken
+            }
+            $token = (Invoke-RestMethod -Uri "https://$registry/oauth2/token" -Method POST -Body $body).access_token
+            $blobHeaders = @{ "Authorization" = "Bearer $token" }
+            $config = Invoke-RestMethod -Uri "https://$registry/v2/$repository/blobs/$configDigest" -Headers $blobHeaders
+            $os = $config.os
+            Write-Host "OS from config blob: $os"
+          }
+        } else {
+          Write-Host "WARNING: az acr manifest show failed: $manifestJson"
+        }
+      } catch {
+        Write-Host "WARNING: Exception during manifest detection: $_"
+      }
+
+      # Fallback: use REST API with token exchange
+      if (-not $os) {
+        Write-Host "Trying REST API fallback..."
+        try {
+          $loginResult = az acr login --name $acrName --expose-token --only-show-errors | ConvertFrom-Json
+          $refreshToken = $loginResult.accessToken
+          $body = @{
+            grant_type = "refresh_token"
+            service = $registry
+            scope = "repository:${repository}:pull"
+            refresh_token = $refreshToken
+          }
+          $token = (Invoke-RestMethod -Uri "https://$registry/oauth2/token" -Method POST -Body $body).access_token
+
+          $manifestHeaders = @{
+            "Authorization" = "Bearer $token"
+            "Accept" = "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json"
+          }
+          $manifest = Invoke-RestMethod -Uri "https://$registry/v2/$repository/manifests/$tag" -Headers $manifestHeaders
+
+          if ($manifest.manifests) {
+            $platformEntry = $manifest.manifests | Where-Object { $_.platform.os -and $_.platform.os -ne 'unknown' } | Select-Object -First 1
+            if ($platformEntry) {
+              $os = $platformEntry.platform.os
+              Write-Host "REST: Manifest list detected, OS: $os"
+            }
+          } elseif ($manifest.config.digest) {
+            $blobHeaders = @{ "Authorization" = "Bearer $token" }
+            $config = Invoke-RestMethod -Uri "https://$registry/v2/$repository/blobs/$($manifest.config.digest)" -Headers $blobHeaders
+            $os = $config.os
+            Write-Host "REST: OS from config blob: $os"
+          }
+        } catch {
+          Write-Host "WARNING: REST API fallback failed: $_"
+        }
       }
 
       if (-not $os) {

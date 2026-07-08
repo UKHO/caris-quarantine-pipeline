@@ -24,7 +24,11 @@ steps:
   inputs:
     targetType: 'inline'
     script: |
-      docker pull ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}
+      $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
+      Write-Host "Pulling image: $image"
+      docker pull $image
+      if ($LASTEXITCODE -ne 0) { exit 1 }
+      Write-Host "##vso[task.setvariable variable=scannedImage]$image"
 
 - task: UkhoSnykScanTask@0
   displayName: 'Snyk container scan'
@@ -35,4 +39,4 @@ steps:
     testType: container
     monitorWhen: always
     severityThreshold: high
-    dockerImageName: '${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}'
+    dockerImageName: '$(scannedImage)'

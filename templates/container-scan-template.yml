@@ -19,6 +19,9 @@ parameters:
     type: string
   - name: sourceTag
     type: string
+  - name: sourceDigest
+    type: string
+    default: ''
   - name: sourceHost
     type: string
   - name: sourceAzureSubscription
@@ -44,174 +47,182 @@ stages:
       - ENVIRONMENT -equals BUS
     steps:
     - powershell: |
-        $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) ${{ parameters.sourceTag }}"
+        $tag = "${{ parameters.sourceTag }}"
+        $repository = "${{ parameters.sourceRepository }}"
+        $registry = "${{ parameters.sourceHost }}"
+
+        Write-Host "Webhook tag='$tag', repository='$repository', registry='$registry'"
+
+        $name = "$(Build.BuildNumber) $('${{ parameters.sourceRepository }}'.Replace('/', '-')) $tag"
         Write-Host "##vso[build.updatebuildnumber]$name"
       displayName: 'Set pipeline run name'
+      name: validation
 
-    - template: steps/detect-platform.yml
-      parameters:
-        sourceAzureSubscription: '${{ parameters.sourceAzureSubscription }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-
-  - job: ContainerScanWindows
-    displayName: 'Scan Pushed Image (Windows)'
-    dependsOn: Detect
-    condition: eq(dependencies.Detect.outputs['platform.os'], 'windows')
-    pool:
-      name: NautilusRelease
-      demands:
-      - ukho.osbuildtag -equals ltsc2022
-    steps:
-    - template: steps/scan-container.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        snykOrganization: '${{ parameters.snykOrganization }}'
-        snykServiceConnection: '${{ parameters.snykServiceConnection }}'
-
-  - job: ContainerScanLinux
-    displayName: 'Scan Pushed Image (Linux)'
-    dependsOn: Detect
-    condition: ne(dependencies.Detect.outputs['platform.os'], 'windows')
-    pool:
-      name: Tiberius
-      demands:
-      - ENVIRONMENT -equals BUS
-    steps:
-    - template: steps/scan-container.yml
-      parameters:
-        sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-        sourceHost: '${{ parameters.sourceHost }}'
-        sourceRepository: '${{ parameters.sourceRepository }}'
-        sourceTag: '${{ parameters.sourceTag }}'
-        snykOrganization: '${{ parameters.snykOrganization }}'
-        snykServiceConnection: '${{ parameters.snykServiceConnection }}'
-
-- template: stages/push-scanned-image.yml
-  parameters:
-    stageName: PushToPreACR
-    stageDisplayName: 'Push scanned image to Pre ACR'
-    dependsOn:
-    - ScanContainer
-    condition: succeeded('ScanContainer')
-    environment: ENG
-    sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-    sourceHost: '${{ parameters.sourceHost }}'
-    sourceRepository: '${{ parameters.sourceRepository }}'
-    sourceTag: '${{ parameters.sourceTag }}'
-    targetRegistryServiceConnection: '${{ parameters.preRegistryServiceConnection }}'
-    targetRegistry: '${{ parameters.preRegistry }}'
-    targetRegistryDisplayName: 'Login to Pre Registry'
-    tagDisplayName: 'Tag Image for Pre'
-    pushDisplayName: 'Push Scanned Image to Pre Registry'
-
-- template: stages/push-scanned-image.yml
-  parameters:
-    stageName: PushToPrivateRepo
-    stageDisplayName: 'Push passed image to Live ACR'
-    dependsOn:
-    - PushToPreACR
-    condition: succeeded('PushToPreACR')
-    environment: BUS
-    sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-    sourceHost: '${{ parameters.sourceHost }}'
-    sourceRepository: '${{ parameters.sourceRepository }}'
-    sourceTag: '${{ parameters.sourceTag }}'
-    targetRegistryServiceConnection: '${{ parameters.destinationRegistryServiceConnection }}'
-    targetRegistry: '${{ parameters.destinationRegistry }}'
-    targetRegistryDisplayName: 'Login to Destination Registry'
-    tagDisplayName: 'Tag Image as Snyk Scanned'
-    pushDisplayName: 'Push Scanned Image to Destination Registry'
-
-- template: stages/push-scanned-image.yml
-  parameters:
-    stageName: PushToGlobalPreACR
-    stageDisplayName: 'Push scanned image to Global Pre ACR'
-    dependsOn:
-    - ScanContainer
-    condition: succeeded('ScanContainer')
-    environment: ENG
-    sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-    sourceHost: '${{ parameters.sourceHost }}'
-    sourceRepository: '${{ parameters.sourceRepository }}'
-    sourceTag: '${{ parameters.sourceTag }}'
-    targetRegistryServiceConnection: '${{ parameters.globalPreRegistryServiceConnection }}'
-    targetRegistry: '${{ parameters.globalPreRegistry }}'
-    targetRegistryDisplayName: 'Login to Global Pre Registry'
-    tagDisplayName: 'Tag Image for Global Pre'
-    pushDisplayName: 'Push Scanned Image to Global Pre Registry'
-
-- template: stages/push-scanned-image.yml
-  parameters:
-    stageName: PushToGlobalLiveACR
-    stageDisplayName: 'Push scanned image to Global Live ACR'
-    dependsOn:
-    - PushToGlobalPreACR
-    condition: succeeded('PushToGlobalPreACR')
-    environment: BUS
-    sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-    sourceHost: '${{ parameters.sourceHost }}'
-    sourceRepository: '${{ parameters.sourceRepository }}'
-    sourceTag: '${{ parameters.sourceTag }}'
-    targetRegistryServiceConnection: '${{ parameters.globalLiveRegistryServiceConnection }}'
-    targetRegistry: '${{ parameters.globalLiveRegistry }}'
-    targetRegistryDisplayName: 'Login to Global Live Registry'
-    tagDisplayName: 'Tag Image for Global Live'
-    pushDisplayName: 'Push Scanned Image to Global Live Registry'
-
-- stage: AlertOnSuccess
-  displayName: 'Alert that scan completed successfully'
-  dependsOn: [PushToPreACR, PushToPrivateRepo, PushToGlobalPreACR, PushToGlobalLiveACR]
-  condition: and(succeeded('PushToPreACR'), succeeded('PushToPrivateRepo'), succeeded('PushToGlobalPreACR'), succeeded('PushToGlobalLiveACR'))
-  jobs:
-  - job: SendSuccessTeamsMessage
-    displayName: 'Send Success Alert to Teams Channel'
-    pool: Mare Nectaris
-    variables:
-      scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
-      fullDestinationImageName: '${{ parameters.destinationRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
-      fullPreImageName: '${{ parameters.preRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
-      fullGlobalPreImageName: '${{ parameters.globalPreRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
-      fullGlobalLiveImageName: '${{ parameters.globalLiveRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
-    steps:
-    - template: steps/send-teams-alert.yml
-      parameters:
-        teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
-        payload:
-          title: 'Container Scan Completed Successfully'
-          message: 'Container scanning passed and image has been pushed to all private registries.'
-          status: 'success'
+    - ${{ if ne(parameters.sourceTag, '') }}:
+      - template: steps/detect-platform.yml
+        parameters:
+          sourceAzureSubscription: '${{ parameters.sourceAzureSubscription }}'
           sourceHost: '${{ parameters.sourceHost }}'
           sourceRepository: '${{ parameters.sourceRepository }}'
           sourceTag: '${{ parameters.sourceTag }}'
-          destinationImage: '$(fullDestinationImageName)'
-          preImage: '$(fullPreImageName)'
-          globalPreImage: '$(fullGlobalPreImageName)'
-          globalLiveImage: '$(fullGlobalLiveImageName)'
-          pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
 
-- stage: AlertOnFail
-  displayName: 'Alert that vulnerable image present'
-  dependsOn: ScanContainer
-  condition: failed('ScanContainer')
-  jobs:
-  - job: SendFailureTeamsMessage
-    displayName: 'Send Failure Alert to Teams Channel'
-    pool: Mare Nectaris
-    steps:
-    - template: steps/send-teams-alert.yml
-      parameters:
-        teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
-        payload:
-          title: 'Container Scan Failed'
-          message: 'Container scanning failed due to vulnerabilities detected in image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}.'
-          status: 'failure'
+  - ${{ if ne(parameters.sourceTag, '') }}:
+    - job: ContainerScanWindows
+      displayName: 'Scan Pushed Image (Windows)'
+      dependsOn: Detect
+      condition: and(succeeded(), eq(dependencies.Detect.outputs['platform.os'], 'windows'))
+      pool:
+        name: NautilusRelease
+        demands:
+        - ukho.osbuildtag -equals ltsc2022
+      steps:
+      - template: steps/scan-container.yml
+        parameters:
+          sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
           sourceHost: '${{ parameters.sourceHost }}'
           sourceRepository: '${{ parameters.sourceRepository }}'
           sourceTag: '${{ parameters.sourceTag }}'
-          pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
+          snykOrganization: '${{ parameters.snykOrganization }}'
+          snykServiceConnection: '${{ parameters.snykServiceConnection }}'
+
+    - job: ContainerScanLinux
+      displayName: 'Scan Pushed Image (Linux)'
+      dependsOn: Detect
+      condition: and(succeeded(), ne(dependencies.Detect.outputs['platform.os'], 'windows'))
+      pool:
+        name: Tiberius
+        demands:
+        - ENVIRONMENT -equals BUS
+      steps:
+      - template: steps/scan-container.yml
+        parameters:
+          sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+          sourceHost: '${{ parameters.sourceHost }}'
+          sourceRepository: '${{ parameters.sourceRepository }}'
+          sourceTag: '${{ parameters.sourceTag }}'
+          snykOrganization: '${{ parameters.snykOrganization }}'
+          snykServiceConnection: '${{ parameters.snykServiceConnection }}'
+
+- ${{ if ne(parameters.sourceTag, '') }}:
+  - template: stages/push-scanned-image.yml
+    parameters:
+      stageName: PushToPreACR
+      stageDisplayName: 'Push scanned image to Pre ACR'
+      dependsOn: []
+      condition: succeeded('ScanContainer')
+      environment: ENG
+      sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+      sourceHost: '${{ parameters.sourceHost }}'
+      sourceRepository: '${{ parameters.sourceRepository }}'
+      sourceTag: '${{ parameters.sourceTag }}'
+      targetRegistryServiceConnection: '${{ parameters.preRegistryServiceConnection }}'
+      targetRegistry: '${{ parameters.preRegistry }}'
+      targetRegistryDisplayName: 'Login to Pre Registry'
+      tagDisplayName: 'Tag Image for Pre'
+      pushDisplayName: 'Push Scanned Image to Pre Registry'
+
+  - template: stages/push-scanned-image.yml
+    parameters:
+      stageName: PushToPrivateRepo
+      stageDisplayName: 'Push passed image to Live ACR'
+      dependsOn:
+      - PushToPreACR
+      condition: succeeded('PushToPreACR')
+      environment: BUS
+      sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+      sourceHost: '${{ parameters.sourceHost }}'
+      sourceRepository: '${{ parameters.sourceRepository }}'
+      sourceTag: '${{ parameters.sourceTag }}'
+      targetRegistryServiceConnection: '${{ parameters.destinationRegistryServiceConnection }}'
+      targetRegistry: '${{ parameters.destinationRegistry }}'
+      targetRegistryDisplayName: 'Login to Destination Registry'
+      tagDisplayName: 'Tag Image as Snyk Scanned'
+      pushDisplayName: 'Push Scanned Image to Destination Registry'
+
+  - template: stages/push-scanned-image.yml
+    parameters:
+      stageName: PushToGlobalPreACR
+      stageDisplayName: 'Push scanned image to Global Pre ACR'
+      dependsOn: []
+      condition: succeeded('ScanContainer')
+      environment: ENG
+      sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+      sourceHost: '${{ parameters.sourceHost }}'
+      sourceRepository: '${{ parameters.sourceRepository }}'
+      sourceTag: '${{ parameters.sourceTag }}'
+      targetRegistryServiceConnection: '${{ parameters.globalPreRegistryServiceConnection }}'
+      targetRegistry: '${{ parameters.globalPreRegistry }}'
+      targetRegistryDisplayName: 'Login to Global Pre Registry'
+      tagDisplayName: 'Tag Image for Global Pre'
+      pushDisplayName: 'Push Scanned Image to Global Pre Registry'
+
+  - template: stages/push-scanned-image.yml
+    parameters:
+      stageName: PushToGlobalLiveACR
+      stageDisplayName: 'Push scanned image to Global Live ACR'
+      dependsOn:
+      - PushToGlobalPreACR
+      condition: succeeded('PushToGlobalPreACR')
+      environment: BUS
+      sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
+      sourceHost: '${{ parameters.sourceHost }}'
+      sourceRepository: '${{ parameters.sourceRepository }}'
+      sourceTag: '${{ parameters.sourceTag }}'
+      targetRegistryServiceConnection: '${{ parameters.globalLiveRegistryServiceConnection }}'
+      targetRegistry: '${{ parameters.globalLiveRegistry }}'
+      targetRegistryDisplayName: 'Login to Global Live Registry'
+      tagDisplayName: 'Tag Image for Global Live'
+      pushDisplayName: 'Push Scanned Image to Global Live Registry'
+
+  - stage: AlertOnSuccess
+    displayName: 'Alert that scan completed successfully'
+    dependsOn: [PushToPreACR, PushToPrivateRepo, PushToGlobalPreACR, PushToGlobalLiveACR]
+    condition: and(succeeded('PushToPreACR'), succeeded('PushToPrivateRepo'), succeeded('PushToGlobalPreACR'), succeeded('PushToGlobalLiveACR'))
+    jobs:
+    - job: SendSuccessTeamsMessage
+      displayName: 'Send Success Alert to Teams Channel'
+      pool: Mare Nectaris
+      variables:
+        scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
+        fullDestinationImageName: '${{ parameters.destinationRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+        fullPreImageName: '${{ parameters.preRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+        fullGlobalPreImageName: '${{ parameters.globalPreRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+        fullGlobalLiveImageName: '${{ parameters.globalLiveRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
+      steps:
+      - template: steps/send-teams-alert.yml
+        parameters:
+          teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
+          payload:
+            title: 'Container Scan Completed Successfully'
+            message: 'Container scanning passed and image has been pushed to all private registries.'
+            status: 'success'
+            sourceHost: '${{ parameters.sourceHost }}'
+            sourceRepository: '${{ parameters.sourceRepository }}'
+            sourceTag: '${{ parameters.sourceTag }}'
+            destinationImage: '$(fullDestinationImageName)'
+            preImage: '$(fullPreImageName)'
+            globalPreImage: '$(fullGlobalPreImageName)'
+            globalLiveImage: '$(fullGlobalLiveImageName)'
+            pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
+
+  - stage: AlertOnFail
+    displayName: 'Alert that vulnerable image present'
+    dependsOn: ScanContainer
+    condition: failed('ScanContainer')
+    jobs:
+    - job: SendFailureTeamsMessage
+      displayName: 'Send Failure Alert to Teams Channel'
+      pool: Mare Nectaris
+      steps:
+      - template: steps/send-teams-alert.yml
+        parameters:
+          teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
+          payload:
+            title: 'Container Scan Failed'
+            message: 'Container scanning failed due to vulnerabilities detected in image: ${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}.'
+            status: 'failure'
+            sourceHost: '${{ parameters.sourceHost }}'
+            sourceRepository: '${{ parameters.sourceRepository }}'
+            sourceTag: '${{ parameters.sourceTag }}'
+            pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
 
