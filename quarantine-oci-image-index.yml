@@ -1,6 +1,16 @@
 trigger: none
 pr: none
 
+# This pipeline runs the container scan for two OCI manifest types:
+#   - application/vnd.oci.image.index.v1+json  (multi-arch image indexes)
+#   - application/vnd.oci.image.manifest.v1+json (single-arch OCI images,
+#     e.g. images built by newer buildx/BuildKit defaults)
+#
+# Both types are also used by Helm OCI charts (manifest.v1), so the container
+# scan template guards against repositories under 'caris/charts/', which remain
+# the responsibility of quarantine-helm-chart.yml. Because a webhook resource
+# ANDs its filters, each media type needs its own webhook resource; the source
+# parameters below coalesce whichever resource actually fired.
 resources:
   webhooks:
     - webhook: AcrWebhookTrigger
@@ -8,6 +18,11 @@ resources:
       filters:
         - path: target.mediaType
           value: "application/vnd.oci.image.index.v1+json"
+    - webhook: AcrWebhookManifestTrigger
+      connection: AcrWebhookConnection
+      filters:
+        - path: target.mediaType
+          value: "application/vnd.oci.image.manifest.v1+json"
 
 variables:
   - template: templates/common-variables.yml
@@ -28,6 +43,7 @@ stages:
     globalLiveRegistryServiceConnection: '$(globalLiveRegistryServiceConnection)'
     globalPreRegistry: '$(globalPreRegistry)'
     globalLiveRegistry: '$(globalLiveRegistry)'
-    sourceRepository: ${{ parameters.AcrWebhookTrigger.target.repository }}
-    sourceTag: ${{ parameters.AcrWebhookTrigger.target.tag }}
-    sourceHost: ${{ parameters.AcrWebhookTrigger.request.host }}
+    sourceRepository: ${{ coalesce(parameters.AcrWebhookTrigger.target.repository, parameters.AcrWebhookManifestTrigger.target.repository) }}
+    sourceTag: ${{ coalesce(parameters.AcrWebhookTrigger.target.tag, parameters.AcrWebhookManifestTrigger.target.tag) }}
+    sourceDigest: ${{ coalesce(parameters.AcrWebhookTrigger.target.digest, parameters.AcrWebhookManifestTrigger.target.digest) }}
+    sourceHost: ${{ coalesce(parameters.AcrWebhookTrigger.request.host, parameters.AcrWebhookManifestTrigger.request.host) }}
