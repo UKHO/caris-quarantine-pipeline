@@ -1,18 +1,25 @@
 trigger: none
 pr: none
 
-# Handles multi-arch OCI image index pushes (application/vnd.oci.image.index.v1+json).
-# Single-arch OCI image manifests (application/vnd.oci.image.manifest.v1+json) are
-# handled by a separate pipeline (quarantine-oci-image-manifest.yml) because Azure
-# DevOps triggers a pipeline only once events are received for ALL of its webhook
-# resources — so the two media types cannot share one pipeline definition.
+# Handles single-arch OCI image manifest pushes
+# (application/vnd.oci.image.manifest.v1+json), e.g. images built by newer
+# buildx/BuildKit defaults. This media type is shared with Helm OCI charts, so
+# both this pipeline and quarantine-helm-chart.yml trigger on it. Each guards by
+# repository path: the Helm pipeline processes only caris/charts/*, while the
+# container scan template (via its ScanContainer stage condition) skips
+# caris/charts/* — ensuring charts are scanned as IaC and images as containers
+# with no double-processing.
+#
+# This is a separate pipeline definition (rather than an extra webhook resource
+# on quarantine-oci-image-index.yml) because Azure DevOps triggers a pipeline
+# only once events are received for ALL of its webhook resources.
 resources:
   webhooks:
     - webhook: AcrWebhookTrigger
       connection: AcrWebhookConnection
       filters:
         - path: target.mediaType
-          value: "application/vnd.oci.image.index.v1+json"
+          value: "application/vnd.oci.image.manifest.v1+json"
 
 variables:
   - template: templates/common-variables.yml

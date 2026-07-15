@@ -4,14 +4,15 @@ This repository contains Azure DevOps pipelines that quarantine artifacts pushed
 
 ## Supported artifact flows
 - **Docker pipeline** (`quarantine-docker-image.yml`): handles `application/vnd.docker.distribution.manifest.v2+json` pushes, performs a Snyk container scan via `templates/container-scan-template.yml`, and promotes images when they pass.
-- **OCI image index pipeline** (`quarantine-oci-image-index.yml`): handles `application/vnd.oci.image.index.v1+json` (multi-arch indexes) **and** `application/vnd.oci.image.manifest.v1+json` (single-arch OCI images) pushes, using the same container scan template as the Docker pipeline.
+- **OCI image index pipeline** (`quarantine-oci-image-index.yml`): handles `application/vnd.oci.image.index.v1+json` (multi-arch indexes) pushes, using the same container scan template as the Docker pipeline.
+- **OCI image manifest pipeline** (`quarantine-oci-image-manifest.yml`): handles `application/vnd.oci.image.manifest.v1+json` (single-arch OCI images, e.g. images built by newer `buildx`/BuildKit defaults) pushes, using the same container scan template.
 - **Helm pipeline** (`quarantine-helm-chart.yml`): also handles `application/vnd.oci.image.manifest.v1+json` pushes, treats the payload as a Helm chart, scans it with Snyk IaC using `templates/helm-scan-template.yml`, and publishes scanned charts to all registries.
 
 All pipelines subscribe to the same incoming webhook connection (`AcrWebhookConnection`) but use `target.mediaType` filters so only the relevant definition runs any stages.
 
-> **Single-arch OCI images vs Helm charts:** Helm OCI charts and single-arch OCI container images (e.g. images built by newer `buildx`/BuildKit defaults) both use the `application/vnd.oci.image.manifest.v1+json` media type. The webhook cannot distinguish them by media type alone, so **both** the OCI-index and Helm pipelines trigger on it. Each pipeline guards by repository path (`caris/charts/*`): the Helm pipeline processes only `caris/charts/*`, while the container scan template skips `caris/charts/*` (see the `ScanContainer` stage condition in `container-scan-template.yml`). This ensures charts are scanned as IaC and images are scanned as containers, with no double-processing.
+> **Single-arch OCI images vs Helm charts:** Helm OCI charts and single-arch OCI container images both use the `application/vnd.oci.image.manifest.v1+json` media type, which the webhook cannot distinguish by media type alone. Both the OCI image manifest pipeline and the Helm pipeline therefore trigger on it, and each guards by repository path (`caris/charts/*`): the Helm pipeline processes only `caris/charts/*`, while the container scan template skips `caris/charts/*` (see the `ScanContainer` stage condition in `container-scan-template.yml`). This ensures charts are scanned as IaC and images as containers, with no double-processing.
 >
-> Because a webhook resource ANDs its filters, the OCI pipeline declares **two** webhook resources — `AcrWebhookTrigger` (index) and `AcrWebhookManifestTrigger` (manifest) — and coalesces whichever fired into `sourceRepository`/`sourceTag`/`sourceHost`.
+> These are **separate pipeline definitions** rather than extra webhook resources on one pipeline: Azure DevOps triggers a pipeline only once events are received for **all** of its declared `webhooks` resources (they are ANDed), so a single media-type event would never fire a pipeline that also declares another webhook resource.
 
 > **Note on hardened images:** The ACR webhook fires for every push to `ukhoacr`, including imports of hardened Docker images (e.g. `dhi/prometheus-operator`). The Helm pipeline guards against processing these by applying a **job-level condition** (`startsWith('caris/charts/', ...)`) in `helm-scan-template.yml` — the entire job is skipped for any repository that is not under `caris/charts/`.
 
@@ -37,7 +38,8 @@ All pipelines subscribe to the same incoming webhook connection (`AcrWebhookConn
 | File | Purpose |
 | --- | --- |
 | `quarantine-docker-image.yml` | Root pipeline for Docker manifest webhook events; references the container template. |
-| `quarantine-oci-image-index.yml` | Root pipeline for OCI image index **and single-arch OCI image manifest** webhook events; references the same container template. Declares two webhook resources (`AcrWebhookTrigger`, `AcrWebhookManifestTrigger`) and coalesces their payloads. |
+| `quarantine-oci-image-index.yml` | Root pipeline for OCI image index (multi-arch) webhook events; references the container template. |
+| `quarantine-oci-image-manifest.yml` | Root pipeline for single-arch OCI image manifest webhook events; references the same container template. Shares the `oci.image.manifest.v1+json` media type with the Helm pipeline and guards by `caris/charts/*`. |
 | `quarantine-helm-chart.yml` | Root pipeline for OCI manifest (Helm) webhook events; references the Helm template. Sets run name to include chart repository and tag. |
 | `templates/container-scan-template.yml` | Container workflow: ScanContainer → PushToPreACR + PushToGlobalPreACR (parallel) → PushToPrivateRepo + PushToGlobalLiveACR → alerts. |
 | `templates/helm-scan-template.yml` | Helm workflow: ScanHelmChart → PushHelmToPreACRs (both pre registries in one job) → PushHelmToLiveACRs (both live registries in one job) → alerts. |
@@ -50,8 +52,8 @@ All pipelines subscribe to the same incoming webhook connection (`AcrWebhookConn
 
 ### Webhook data flow
 1. The ACR webhook calls the shared service URI with payload metadata.
-2. Each pipeline filters on `target.mediaType` to ensure only the relevant manifest type executes stages. The OCI pipeline registers two webhook resources so it can react to both `oci.image.index.v1+json` and `oci.image.manifest.v1+json`.
-3. `${{ parameters.<webhook>.target.repository }}`, `.target.tag`, and `.request.host` are captured at compile time and passed into the templates as `sourceRepository`, `sourceTag`, and `sourceHost`. Where a pipeline has multiple webhook resources, the values are `coalesce`d so the resource that fired supplies the data.
+2. Each pipeline filters on `target.mediaType` to ensure only the relevant manifest type executes stages. The `oci.image.manifest.v1+json` type is shared by the OCI image manifest pipeline and the Helm pipeline, which disambiguate by repository path.
+3. `${{ parameters.AcrWebhookTrigger.target.repository }}`, `.target.tag`, and `.request.host` are captured at compile time and passed into the templates as `sourceRepository`, `sourceTag`, and `sourceHost`.
 
 ## Container pipeline (Docker / OCI image index / single-arch OCI image)
 `templates/container-scan-template.yml` handles Docker, OCI image index, and single-arch OCI image artifacts:
@@ -100,7 +102,7 @@ Additional variables the Helm pipeline expects (see `quarantine-helm-chart.yml`)
    - `AcrWebhookConnection` for the shared webhook resource.
    - Docker registry service connections are configured as **Azure Container Registry - Workload Identity Federation** connections.
 2. **Pipelines**
-   - Create three Azure DevOps pipeline definitions pointing to `quarantine-docker-image.yml`, `quarantine-oci-image-index.yml`, and `quarantine-helm-chart.yml`.
+   - Create four Azure DevOps pipeline definitions pointing to `quarantine-docker-image.yml`, `quarantine-oci-image-index.yml`, `quarantine-oci-image-manifest.yml`, and `quarantine-helm-chart.yml`.
 3. **Permissions**
    - Docker service principals: AcrPull on source, AcrPush on all destination registries (carispreacr, carisliveacr, globalpreacr, globalliveacr).
    - Helm Azure subscription SPs: AcrPush + Reader on globalpreacr/globalliveacr (managed via `acr_manager_sp_names` in `caris-infra/terraform/global`).
