@@ -38,6 +38,10 @@ parameters:
 stages:
 - stage: ScanContainer
   displayName: 'Scan Container'
+  # Helm OCI charts share the oci.image.manifest.v1+json media type with
+  # single-arch OCI images. Charts (caris/charts/*) are handled by
+  # quarantine-helm-chart.yml, so skip them here to avoid double-processing.
+  condition: not(startsWith('${{ parameters.sourceRepository }}', 'caris/charts/'))
   jobs:
   - job: Detect
     displayName: 'Detect image platform'
