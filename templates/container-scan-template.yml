@@ -113,7 +113,7 @@ stages:
       stageName: PushToPreACR
       stageDisplayName: 'Push scanned image to Pre ACR'
       dependsOn: []
-      condition: succeeded('ScanContainer')
+      condition: or(eq(dependencies.ScanContainer.outputs['ContainerScanWindows.scanResult.passed'], 'true'), eq(dependencies.ScanContainer.outputs['ContainerScanLinux.scanResult.passed'], 'true'))
       environment: ENG
       sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
       sourceHost: '${{ parameters.sourceHost }}'
@@ -148,7 +148,7 @@ stages:
       stageName: PushToGlobalPreACR
       stageDisplayName: 'Push scanned image to Global Pre ACR'
       dependsOn: []
-      condition: succeeded('ScanContainer')
+      condition: or(eq(dependencies.ScanContainer.outputs['ContainerScanWindows.scanResult.passed'], 'true'), eq(dependencies.ScanContainer.outputs['ContainerScanLinux.scanResult.passed'], 'true'))
       environment: ENG
       sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
       sourceHost: '${{ parameters.sourceHost }}'

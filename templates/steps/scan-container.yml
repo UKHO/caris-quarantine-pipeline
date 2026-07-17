@@ -40,3 +40,13 @@ steps:
     monitorWhen: always
     severityThreshold: high
     dockerImageName: '$(scannedImage)'
+
+# Publish an output variable that downstream push stages can OR together to
+# determine whether the scan passed. Only runs when all prior steps (including
+# the Snyk scan) succeeded, so 'passed=true' reliably signals a clean scan.
+# This avoids relying on stage-level succeeded('ScanContainer'), which returns
+# false whenever the stage contains a skipped job (the Windows scan job is
+# skipped for Linux images and vice versa).
+- pwsh: Write-Host "##vso[task.setvariable variable=passed;isOutput=true]true"
+  name: scanResult
+  displayName: 'Mark scan passed'
