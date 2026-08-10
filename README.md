@@ -1,6 +1,6 @@
 # CARIS Quarantine Pipeline
 
-This repository contains Azure DevOps pipelines that quarantine artifacts pushed to a public Azure Container Registry (ACR). Artifacts are scanned with Snyk and, if clean, promoted to **four** private registries (Caris Pre, Caris Live, Global Pre, and Global Live). Vulnerable artifacts are **not** written to any destination — only a Teams alert is sent.
+This repository contains Azure DevOps pipelines that quarantine artifacts pushed to a public Azure Container Registry (ACR). Artifacts are scanned with Snyk and, if clean, promoted to **two** private registries (Global Pre and Global Live). Vulnerable artifacts are **not** written to any destination — only a Teams alert is sent.
 
 ## Supported artifact flows
 - **Docker pipeline** (`quarantine-docker-image.yml`): handles `application/vnd.docker.distribution.manifest.v2+json` pushes, performs a Snyk container scan via `templates/container-scan-template.yml`, and promotes images when they pass.
@@ -21,15 +21,13 @@ All pipelines subscribe to the same incoming webhook connection (`AcrWebhookConn
 | Registry | Purpose | Service Connection (Docker) | Service Connection (Azure Sub) |
 | --- | --- | --- | --- |
 | `ukhoacr.azurecr.io` | Source — public registry where images/charts arrive | `ukhoacr-docker` | `quarantine-helm-ukhoacr` |
-| `carispreacr.azurecr.io` | Caris Pre — pre-production scanned artifacts | `carispreacr-docker` | `quarantine-helm-preacr` |
-| `carisliveacr.azurecr.io` | Caris Live — production scanned artifacts | `carisliveacr-docker` | `quarantine-helm-liveacr` |
 | `globalpreacr.azurecr.io` | Global Pre — pre-production (shared platform) | `globalpreacr-docker` | `quarantine-helm-preacr` |
 | `globalliveacr.azurecr.io` | Global Live — production (shared platform) | `globalliveacr-docker` | `quarantine-helm-liveacr` |
 
 ## High-level behavior
 - Listens for ACR webhook pushes (Docker and Helm/OCI) and extracts repository, tag, and registry host from the payload.
 - Pulls the referenced artifact and runs the appropriate Snyk scan (container or IaC).
-- **On success:** rewrites the tag/version with a `-snyk-scanned` suffix and pushes to `scanned/` namespaces in all four destination registries (Caris Pre → Caris Live, Global Pre → Global Live).
+- **On success:** rewrites the tag/version with a `-snyk-scanned` suffix and pushes to `scanned/` namespaces in both destination registries (Global Pre → Global Live).
 - **On failure:** sends a Teams alert only. No vulnerable-tagged artifacts are written.
 - Helm stages authenticate to every registry interaction using `az acr login --expose-token` piped into `helm registry login --password-stdin` for short-lived credentials.
 
@@ -41,8 +39,8 @@ All pipelines subscribe to the same incoming webhook connection (`AcrWebhookConn
 | `quarantine-oci-image-index.yml` | Root pipeline for OCI image index (multi-arch) webhook events; references the container template. |
 | `quarantine-oci-image-manifest.yml` | Root pipeline for single-arch OCI image manifest webhook events; references the same container template. Shares the `oci.image.manifest.v1+json` media type with the Helm pipeline and guards by `caris/charts/*`. |
 | `quarantine-helm-chart.yml` | Root pipeline for OCI manifest (Helm) webhook events; references the Helm template. Sets run name to include chart repository and tag. |
-| `templates/container-scan-template.yml` | Container workflow: ScanContainer → PushToPreACR + PushToGlobalPreACR (parallel) → PushToPrivateRepo + PushToGlobalLiveACR → alerts. |
-| `templates/helm-scan-template.yml` | Helm workflow: ScanHelmChart → PushHelmToPreACRs (both pre registries in one job) → PushHelmToLiveACRs (both live registries in one job) → alerts. |
+| `templates/container-scan-template.yml` | Container workflow: ScanContainer → PushToGlobalPreACR → PushToGlobalLiveACR → alerts. |
+| `templates/helm-scan-template.yml` | Helm workflow: ScanHelmChart → PushHelmToPreACRs (Global Pre) → PushHelmToLiveACRs (Global Live) → alerts. |
 | `templates/common-variables.yml` | Shared variable definitions for all pipelines (service connections, registry hosts, Snyk config, global registry details). |
 | `scripts/helm/HelmPipeline.psm1` | PowerShell module: Helm/ACR helper functions used by the Helm pipeline. |
 | `scripts/helm/HelmPipeline.psd1` | PowerShell module manifest. |
@@ -60,13 +58,12 @@ All pipelines subscribe to the same incoming webhook connection (`AcrWebhookConn
 - Skips repositories under `caris/charts/` (handled by the Helm pipeline) via the `ScanContainer` stage condition.
 - Authenticates against source and all destination registries via Docker service connections.
 - Pulls the pushed image, runs `UkhoSnykScanTask@0` in container mode.
-- On success, pushes the scanned image (tagged `-snyk-scanned`) to all four registries in parallel chains:
-  - **Caris path:** PushToPreACR (ENG) → PushToPrivateRepo (BUS)
+- On success, pushes the scanned image (tagged `-snyk-scanned`) to the global registries:
   - **Global path:** PushToGlobalPreACR (ENG) → PushToGlobalLiveACR (BUS)
 - On failure, sends a Teams notification only.
 
 Required service connections (defined via `templates/common-variables.yml`):
-- Docker: `ukhoacr-docker`, `carispreacr-docker`, `carisliveacr-docker`, `globalpreacr-docker`, `globalliveacr-docker`
+- Docker: `ukhoacr-docker`, `globalpreacr-docker`, `globalliveacr-docker`
 - `SnykAuth` for Snyk scanning.
 - `teamsWebhookEndpoint` secret (from `caris-quarantine` variable group).
 

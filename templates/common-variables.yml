@@ -4,14 +4,6 @@ variables:
     value: 'ukhoacr-docker'
   - name: sourceAzureSubscription
     value: 'Public ACR live'
-  - name: destinationRegistryServiceConnection
-    value: 'carisliveacr-docker'
-  - name: preRegistryServiceConnection
-    value: 'carispreacr-docker'
-  - name: destinationRegistry
-    value: 'carisliveacr.azurecr.io'
-  - name: preRegistry
-    value: 'carispreacr.azurecr.io'
   - name: snykServiceConnection
     value: 'SnykAuth'
   - name: snykOrganization

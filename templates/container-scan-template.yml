@@ -1,14 +1,6 @@
 parameters:
   - name: sourceRegistryServiceConnection
     type: string
-  - name: destinationRegistryServiceConnection
-    type: string
-  - name: preRegistryServiceConnection
-    type: string
-  - name: destinationRegistry
-    type: string
-  - name: preRegistry
-    type: string
   - name: snykServiceConnection
     type: string
   - name: snykOrganization
@@ -110,41 +102,6 @@ stages:
 - ${{ if ne(parameters.sourceTag, '') }}:
   - template: stages/push-scanned-image.yml
     parameters:
-      stageName: PushToPreACR
-      stageDisplayName: 'Push scanned image to Pre ACR'
-      dependsOn: []
-      condition: succeeded('ScanContainer')
-      environment: ENG
-      sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-      sourceHost: '${{ parameters.sourceHost }}'
-      sourceRepository: '${{ parameters.sourceRepository }}'
-      sourceTag: '${{ parameters.sourceTag }}'
-      targetRegistryServiceConnection: '${{ parameters.preRegistryServiceConnection }}'
-      targetRegistry: '${{ parameters.preRegistry }}'
-      targetRegistryDisplayName: 'Login to Pre Registry'
-      tagDisplayName: 'Tag Image for Pre'
-      pushDisplayName: 'Push Scanned Image to Pre Registry'
-
-  - template: stages/push-scanned-image.yml
-    parameters:
-      stageName: PushToPrivateRepo
-      stageDisplayName: 'Push passed image to Live ACR'
-      dependsOn:
-      - PushToPreACR
-      condition: succeeded('PushToPreACR')
-      environment: BUS
-      sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
-      sourceHost: '${{ parameters.sourceHost }}'
-      sourceRepository: '${{ parameters.sourceRepository }}'
-      sourceTag: '${{ parameters.sourceTag }}'
-      targetRegistryServiceConnection: '${{ parameters.destinationRegistryServiceConnection }}'
-      targetRegistry: '${{ parameters.destinationRegistry }}'
-      targetRegistryDisplayName: 'Login to Destination Registry'
-      tagDisplayName: 'Tag Image as Snyk Scanned'
-      pushDisplayName: 'Push Scanned Image to Destination Registry'
-
-  - template: stages/push-scanned-image.yml
-    parameters:
       stageName: PushToGlobalPreACR
       stageDisplayName: 'Push scanned image to Global Pre ACR'
       dependsOn: []
@@ -180,16 +137,14 @@ stages:
 
   - stage: AlertOnSuccess
     displayName: 'Alert that scan completed successfully'
-    dependsOn: [PushToPreACR, PushToPrivateRepo, PushToGlobalPreACR, PushToGlobalLiveACR]
-    condition: and(succeeded('PushToPreACR'), succeeded('PushToPrivateRepo'), succeeded('PushToGlobalPreACR'), succeeded('PushToGlobalLiveACR'))
+    dependsOn: [PushToGlobalPreACR, PushToGlobalLiveACR]
+    condition: and(succeeded('PushToGlobalPreACR'), succeeded('PushToGlobalLiveACR'))
     jobs:
     - job: SendSuccessTeamsMessage
       displayName: 'Send Success Alert to Teams Channel'
       pool: Mare Nectaris
       variables:
         scannedImageTag: '${{ parameters.sourceTag }}-snyk-scanned'
-        fullDestinationImageName: '${{ parameters.destinationRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
-        fullPreImageName: '${{ parameters.preRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
         fullGlobalPreImageName: '${{ parameters.globalPreRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
         fullGlobalLiveImageName: '${{ parameters.globalLiveRegistry }}/scanned/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}-snyk-scanned'
       steps:
@@ -198,13 +153,11 @@ stages:
           teamsWebhookEndpoint: '${{ parameters.teamsWebhookEndpoint }}'
           payload:
             title: 'Container Scan Completed Successfully'
-            message: 'Container scanning passed and image has been pushed to all private registries.'
+            message: 'Container scanning passed and image has been pushed to the global registries.'
             status: 'success'
             sourceHost: '${{ parameters.sourceHost }}'
             sourceRepository: '${{ parameters.sourceRepository }}'
             sourceTag: '${{ parameters.sourceTag }}'
-            destinationImage: '$(fullDestinationImageName)'
-            preImage: '$(fullPreImageName)'
             globalPreImage: '$(fullGlobalPreImageName)'
             globalLiveImage: '$(fullGlobalLiveImageName)'
             pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
