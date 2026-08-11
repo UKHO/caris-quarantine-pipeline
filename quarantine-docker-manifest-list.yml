@@ -17,10 +17,6 @@ stages:
   parameters:
     sourceRegistryServiceConnection: '$(sourceRegistryServiceConnection)'
     sourceAzureSubscription: '$(sourceAzureSubscription)'
-    destinationRegistryServiceConnection: '$(destinationRegistryServiceConnection)'
-    preRegistryServiceConnection: '$(preRegistryServiceConnection)'
-    destinationRegistry: '$(destinationRegistry)'
-    preRegistry: '$(preRegistry)'
     snykServiceConnection: '$(snykServiceConnection)'
     snykOrganization: '$(snykOrganization)'
     teamsWebhookEndpoint: '$(teamsWebhookEndpoint)'

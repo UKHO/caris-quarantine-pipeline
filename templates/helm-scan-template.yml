@@ -7,14 +7,6 @@ parameters:
     type: string
   - name: sourceRegistryServiceConnection
     type: string
-  - name: destinationRegistryServiceConnection
-    type: string
-  - name: preRegistryServiceConnection
-    type: string
-  - name: destinationRegistry
-    type: string
-  - name: preRegistry
-    type: string
   - name: snykServiceConnection
     type: string
   - name: snykOrganization
@@ -171,14 +163,6 @@ stages:
 
       - template: steps/helm-push-to-acr.yml
         parameters:
-          displayName: 'Push Helm Chart to Caris Pre ACR'
-          azureSubscription: '${{ parameters.preAzureSubscription }}'
-          registryHost: '${{ parameters.preRegistry }}'
-          repository: 'scanned/charts'
-          chartPath: '$(repackagedChartPath)'
-
-      - template: steps/helm-push-to-acr.yml
-        parameters:
           displayName: 'Push Helm Chart to Global Pre ACR'
           azureSubscription: '${{ parameters.preAzureSubscription }}'
           registryHost: '${{ parameters.globalPreRegistry }}'
@@ -218,14 +202,6 @@ stages:
 
       - template: steps/helm-push-to-acr.yml
         parameters:
-          displayName: 'Push Helm Chart to Caris Live ACR'
-          azureSubscription: '${{ parameters.liveAzureSubscription }}'
-          registryHost: '${{ parameters.destinationRegistry }}'
-          repository: 'scanned/charts'
-          chartPath: '$(chartArchivePath)'
-
-      - template: steps/helm-push-to-acr.yml
-        parameters:
           displayName: 'Push Helm Chart to Global Live ACR'
           azureSubscription: '${{ parameters.liveAzureSubscription }}'
           registryHost: '${{ parameters.globalLiveRegistry }}'
@@ -250,8 +226,6 @@ stages:
             status: 'success'
             sourceHost: '${{ parameters.sourceHost }}'
             sourceRepository: '${{ parameters.sourceRepository }}'
-            destinationRegistry: '${{ parameters.destinationRegistry }}'
-            preRegistry: '${{ parameters.preRegistry }}'
             globalPreRegistry: '${{ parameters.globalPreRegistry }}'
             globalLiveRegistry: '${{ parameters.globalLiveRegistry }}'
             pipelineUrl: '$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
