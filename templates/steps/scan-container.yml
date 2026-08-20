@@ -24,7 +24,19 @@ steps:
   inputs:
     targetType: 'inline'
     script: |
-      $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
+      $tag = "${{ parameters.sourceTag }}"
+
+      # Defensive guard: OCI referrers (e.g. notation signatures) are published
+      # under a sha256-<digest> fallback tag and are not scannable images. The
+      # Detect job normally skips these, but guard here too so a plain docker
+      # pull never fails on 'unsupported media type ...notary.signature'.
+      if ($tag -match '^sha256-[0-9a-f]{64}$') {
+        Write-Host "Referrer/signature fallback tag '$tag' detected; skipping pull and scan."
+        Write-Host "##vso[task.setvariable variable=skipScan]true"
+        exit 0
+      }
+
+      $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:$tag"
       Write-Host "Pulling image: $image"
       docker pull $image
       if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -32,6 +44,7 @@ steps:
 
 - task: UkhoSnykScanTask@0
   displayName: 'Snyk container scan'
+  condition: and(succeeded(), ne(variables['skipScan'], 'true'))
   inputs:
     failOnIssues: true
     organization: '${{ parameters.snykOrganization }}'

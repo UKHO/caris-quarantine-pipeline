@@ -66,7 +66,7 @@ stages:
     - job: ContainerScanWindows
       displayName: 'Scan Pushed Image (Windows)'
       dependsOn: Detect
-      condition: and(succeeded(), eq(dependencies.Detect.outputs['platform.os'], 'windows'))
+      condition: and(succeeded(), eq(dependencies.Detect.outputs['platform.os'], 'windows'), ne(dependencies.Detect.outputs['platform.skip'], 'true'))
       pool:
         name: NautilusRelease
         demands:
@@ -84,7 +84,7 @@ stages:
     - job: ContainerScanLinux
       displayName: 'Scan Pushed Image (Linux)'
       dependsOn: Detect
-      condition: and(succeeded(), ne(dependencies.Detect.outputs['platform.os'], 'windows'))
+      condition: and(succeeded(), ne(dependencies.Detect.outputs['platform.os'], 'windows'), ne(dependencies.Detect.outputs['platform.skip'], 'true'))
       pool:
         name: Tiberius
         demands:
@@ -105,7 +105,7 @@ stages:
       stageName: PushToGlobalPreACR
       stageDisplayName: 'Push scanned image to Global Pre ACR'
       dependsOn: []
-      condition: succeeded('ScanContainer')
+      condition: and(succeeded('ScanContainer'), ne(dependencies.ScanContainer.outputs['Detect.platform.skip'], 'true'))
       environment: ENG
       sourceRegistryServiceConnection: '${{ parameters.sourceRegistryServiceConnection }}'
       sourceHost: '${{ parameters.sourceHost }}'

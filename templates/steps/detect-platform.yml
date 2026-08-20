@@ -25,6 +25,12 @@ steps:
       Write-Host "Detecting platform for ${registry}/${repository}:${tag}"
 
       $os = $null
+      $isReferrer = $false
+
+      # OCI referrers (e.g. notation signatures) are published under a fallback
+      # tag of the form sha256-<64 hex>. Genuine images never use this tag shape,
+      # so it is a safe secondary signal that the artifact is not scannable.
+      $looksLikeReferrerTag = $tag -match '^sha256-[0-9a-f]{64}$'
 
       # Try az acr manifest show first (handles auth via service connection)
       try {
@@ -37,7 +43,18 @@ steps:
             if ($platformEntry) {
               $os = $platformEntry.platform.os
               Write-Host "Manifest list detected, OS: $os"
+            } else {
+              # An index with no runnable platform entries is a signature/
+              # attestation/referrer artifact (e.g. application/vnd.cncf.notary.signature),
+              # not a scannable image. Flag it so the scan and promotion are skipped.
+              $artifactTypes = ($manifest.manifests | ForEach-Object { $_.artifactType } | Where-Object { $_ }) -join ', '
+              $isReferrer = $true
+              Write-Host "Index has no runnable platform; treating as non-scannable referrer/signature artifact. artifactTypes: $artifactTypes"
             }
+          } elseif ($manifest.subject) {
+            # A manifest carrying a subject is a referrer to another image.
+            $isReferrer = $true
+            Write-Host "Manifest has a subject reference; treating as non-scannable referrer/signature artifact."
           } elseif ($manifest.config.digest) {
             # Single-platform manifest - fetch config blob via REST with CLI token
             $configDigest = $manifest.config.digest
@@ -88,7 +105,14 @@ steps:
             if ($platformEntry) {
               $os = $platformEntry.platform.os
               Write-Host "REST: Manifest list detected, OS: $os"
+            } else {
+              $artifactTypes = ($manifest.manifests | ForEach-Object { $_.artifactType } | Where-Object { $_ }) -join ', '
+              $isReferrer = $true
+              Write-Host "REST: Index has no runnable platform; treating as non-scannable referrer/signature artifact. artifactTypes: $artifactTypes"
             }
+          } elseif ($manifest.subject) {
+            $isReferrer = $true
+            Write-Host "REST: Manifest has a subject reference; treating as non-scannable referrer/signature artifact."
           } elseif ($manifest.config.digest) {
             $blobHeaders = @{ "Authorization" = "Bearer $token" }
             $config = Invoke-RestMethod -Uri "https://$registry/v2/$repository/blobs/$($manifest.config.digest)" -Headers $blobHeaders
@@ -100,6 +124,19 @@ steps:
         }
       }
 
+      # A signature/referrer artifact is not a scannable image. Emit skip=true so
+      # the scan and promotion stages are bypassed and no failure alert fires.
+      # The sha256-<digest> fallback tag is a safe secondary signal (genuine
+      # images never use that tag shape).
+      if (-not $os -and ($isReferrer -or $looksLikeReferrerTag)) {
+        Write-Host "Artifact identified as a signature/referrer; skipping scan and promotion."
+        Write-Host "##vso[task.setvariable variable=os;isOutput=true]"
+        Write-Host "##vso[task.setvariable variable=skip;isOutput=true]true"
+        exit 0
+      }
+
+      # Fail-safe: if the artifact could not be classified, treat it as a
+      # scannable Linux image rather than silently skipping a possible real image.
       if (-not $os) {
         Write-Host "Unable to determine OS, defaulting to linux"
         $os = "linux"
@@ -107,4 +144,5 @@ steps:
 
       Write-Host "Detected platform OS: $os"
       Write-Host "##vso[task.setvariable variable=os;isOutput=true]$os"
+      Write-Host "##vso[task.setvariable variable=skip;isOutput=true]false"
       exit 0
