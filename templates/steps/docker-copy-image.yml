@@ -38,8 +38,25 @@ steps:
     script: |
       $image = "${{ parameters.sourceHost }}/${{ parameters.sourceRepository }}:${{ parameters.sourceTag }}"
       Write-Host "Pulling image: $image"
-      docker pull $image
-      if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # Retry with backoff. When a multi-arch image is imported into the source
+      # registry, ACR fires the push webhook (triggering this pipeline) as soon
+      # as the manifest list appears, which can be before all child manifests
+      # have finished copying. A pull issued in that window fails with
+      # 'manifest unknown'/'not found'. Retrying lets the import finish before we
+      # give up, so the promotion no longer fails on a transient race.
+      $maxAttempts = 5
+      for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        docker pull $image
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($attempt -eq $maxAttempts) {
+          Write-Host "##vso[task.logissue type=error]docker pull failed for $image after $maxAttempts attempts."
+          exit 1
+        }
+        $delay = 15 * $attempt
+        Write-Host "Pull attempt $attempt/$maxAttempts failed (exit $LASTEXITCODE); retrying in ${delay}s (image may still be importing)."
+        Start-Sleep -Seconds $delay
+      }
       Write-Host "##vso[task.setvariable variable=sourceImage]$image"
 
 - task: Docker@2
