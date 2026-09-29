@@ -40,3 +40,4 @@ stages:
     sourceTag: ${{ parameters.AcrWebhookTrigger.target.tag }}
     sourceDigest: ${{ parameters.AcrWebhookTrigger.target.digest }}
     sourceHost: ${{ parameters.AcrWebhookTrigger.request.host }}
+    
